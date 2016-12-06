@@ -1,5 +1,7 @@
 version: '2'
 services:
+  rabbitmq:
+    image: rabbitmq
   py27:
     build:
       context: .
@@ -7,6 +9,10 @@ services:
     command: tox
     volumes:
       - .:/code
+    depends_on:
+      - rabbitmq
+    environment:
+      RABBITMQ_HOST: rabbitmq
   py34:
     build:
       context: .
@@ -14,6 +20,10 @@ services:
     command: tox
     volumes:
       - .:/code
+    depends_on:
+      - rabbitmq
+    environment:
+      RABBITMQ_HOST: rabbitmq
   py35:
     build:
       context: .
@@ -21,3 +31,7 @@ services:
     command: tox
     volumes:
       - .:/code
+    depends_on:
+      - rabbitmq
+    environment:
+      RABBITMQ_HOST: rabbitmq
