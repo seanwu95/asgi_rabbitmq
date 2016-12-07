@@ -13,7 +13,7 @@ services:
       - rabbitmq
     environment:
       RABBITMQ_HOST: rabbitmq
-      TOXENV: py27
+      TOXENV: py27-django18,py27-django19,py27-django110
   py34:
     build:
       context: .
@@ -25,7 +25,7 @@ services:
       - rabbitmq
     environment:
       RABBITMQ_HOST: rabbitmq
-      TOXENV: py34
+      TOXENV: py34-django18,py34-django19,py34-django110
   py35:
     build:
       context: .
@@ -37,4 +37,4 @@ services:
       - rabbitmq
     environment:
       RABBITMQ_HOST: rabbitmq
-      TOXENV: py35
+      TOXENV: py35-django18,py35-django19,py35-django110
