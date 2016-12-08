@@ -1,1 +1,1 @@
-pytest_plugins = ['management_fixtures']
+pytest_plugins = ['management_fixtures', 'ws_client_fixtures']
