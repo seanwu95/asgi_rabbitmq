@@ -8,7 +8,7 @@ from twisted.internet import reactor, threads
 
 
 @pytest.yield_fixture(scope='session')
-def ws_client(live_server):
+def ws_client(asgi_server):
     """WebSocket Client which can send messages to the Live Server."""
 
     # FIXME: some generated id based mechanism.
@@ -20,9 +20,9 @@ def ws_client(live_server):
         requests.put(message)
         return responses.get(timeout=30)
 
-    host = live_server.thread.host
-    port = live_server.thread.port
+    host, port = asgi_server
     thread = WSClientThread(requests, responses, host, port)
+    thread.daemon = True
     thread.start()
     yield client
     thread.terminate()
