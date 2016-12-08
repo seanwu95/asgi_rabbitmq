@@ -1,10 +1,14 @@
 import threading
-from queue import Queue
 
 import pytest
 from autobahn.twisted.websocket import (WebSocketClientFactory,
                                         WebSocketClientProtocol)
 from twisted.internet import reactor, threads
+
+try:
+    from queue import Queue
+except ImportError:
+    from Queue import Queue
 
 
 @pytest.yield_fixture(scope='session')
