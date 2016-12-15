@@ -1,6 +1,14 @@
-import asgi_rabbitmq.core
+import pytest
+from asgi_rabbitmq import RabbitmqChannelLayer
+from asgiref.conformance import ConformanceTestCase
 
 
-def test_me():
+class RabbitmqChannelLayerTest(ConformanceTestCase):
 
-    asgi_rabbitmq.core
+    @pytest.fixture(autouse=True)
+    def init_conformance_test(self, vhost):
+
+        self.channel_layer = RabbitmqChannelLayer(vhost)
+
+    expiry_delay = 1.1
+    capacity_limit = 5
