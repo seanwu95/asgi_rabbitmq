@@ -14,8 +14,8 @@ def environment():
         'RABBITMQ_HOST': 'localhost',
         'RABBITMQ_PORT': '5672',
         'RABBITMQ_MANAGEMENT_PORT': '15672',
-        'RABBITMQ_MANAGEMENT_USER': 'guest',
-        'RABBITMQ_MANAGEMENT_PASSWORD': 'guest',
+        'RABBITMQ_USER': 'guest',
+        'RABBITMQ_PASSWORD': 'guest',
     }
     for varname, default in environment.items():
         environment[varname] = os.environ.get(varname, default)
@@ -28,8 +28,8 @@ def management(environment):
 
     hostname = environment['RABBITMQ_HOST']
     port = environment['RABBITMQ_MANAGEMENT_PORT']
-    user = environment['RABBITMQ_MANAGEMENT_USER']
-    password = environment['RABBITMQ_MANAGEMENT_PASSWORD']
+    user = environment['RABBITMQ_USER']
+    password = environment['RABBITMQ_PASSWORD']
     return AdminAPI('http://%s:%s' % (hostname, port), (user, password))
 
 
