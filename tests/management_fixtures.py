@@ -47,10 +47,13 @@ def remove_vhost(management):
 
 
 @pytest.fixture
-def vhost(management, remove_vhost):
+def vhost(management, remove_vhost, environment):
     """Create random named virtual host."""
 
     name = ''.join(random.choice(string.ascii_letters) for i in range(8))
     management.create_vhost(name)
     remove_vhost.append(name)
-    return name
+    host = environment['RABBITMQ_HOST']
+    port = environment['RABBITMQ_PORT']
+    url = 'amqp://%s:%s/%s' % (host, port, name)
+    return url
