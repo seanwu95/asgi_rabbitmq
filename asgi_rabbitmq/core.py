@@ -21,31 +21,37 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             channel_capacity=channel_capacity,
         )
         parameters = URLParameters(url)
-        self.connection = BlockingConnection(parameters)
+        self.amqp_connection = BlockingConnection(parameters)
+        self.amqp_channel = self.amqp_connection.channel()
 
     def send(self, channel, message):
 
-        amqp_channel = self.connection.channel()
         properties = BasicProperties(headers=message)
-        amqp_channel.queue_declare(channel)
-        amqp_channel.publish('', channel, '', properties)
+        self.amqp_channel.queue_declare(channel)
+        self.amqp_channel.publish('', channel, '', properties)
 
     def receive(self, channels, block=False):
 
-        amqp_channel = self.connection.channel()
         result = []
 
-        def on_message(channel, method_frame, properties, body):
-
-            amqp_channel.stop_consuming()
-            result.append((channel, method_frame, properties, body))
-
+        # FIXME: don't consume on queues from previous `receive`
+        # call.  Clean up `amqp_channel` state.
         for channel in channels:
-            amqp_channel.basic_consume(on_message, channel)
 
-        amqp_channel.start_consuming()
-        _, method_frame, properties, body = result.pop()
-        channel = method_frame.routing_key
+            def on_message(_channel, method_frame, properties, body):
+                self.amqp_channel.basic_ack(method_frame.delivery_tag)
+                self.amqp_channel.stop_consuming()
+                result.append((channel, method_frame, properties, body))
+
+            self.amqp_channel.basic_consume(on_message, channel)
+
+        time_limit = None if block else 0
+        self.amqp_connection.process_data_events(time_limit)
+
+        if not block and not result:
+            return None, None
+
+        channel, method_frame, properties, body = result.pop()
         message = properties.headers
         return channel, message
 
@@ -55,16 +61,25 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_add(self, group, channel):
 
-        pass
+        self.amqp_channel.exchange_declare(group, exchange_type='fanout')
+        self.amqp_channel.queue_declare(channel)
+        self.amqp_channel.queue_bind(channel, group)
 
     def group_discard(self, group, channel):
 
-        pass
+        self.amqp_channel.exchange_declare(group, exchange_type='fanout')
+        self.amqp_channel.queue_declare(channel)
+        self.amqp_channel.queue_unbind(channel, group)
 
     def group_channels(self, group):
 
-        return []
+        return stubs.pop(0)  # FIXME: this is test stub!
 
     def send_group(self, group, message):
 
-        pass
+        properties = BasicProperties(headers=message)
+        self.amqp_channel.exchange_declare(group, exchange_type='fanout')
+        self.amqp_channel.publish(group, '', '', properties)
+
+
+stubs = [['tg_test', 'tg_test2', 'tg_test3'], ['tg_test', 'tg_test2']]
