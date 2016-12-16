@@ -1,3 +1,5 @@
+from functools import partial
+
 from asgiref.base_layer import BaseChannelLayer
 from pika import BlockingConnection, URLParameters
 from pika.spec import BasicProperties
@@ -36,14 +38,9 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         # FIXME: don't consume on queues from previous `receive`
         # call.  Clean up `amqp_channel` state.
-        for channel in channels:
-
-            def on_message(_channel, method_frame, properties, body):
-                self.amqp_channel.basic_ack(method_frame.delivery_tag)
-                self.amqp_channel.stop_consuming()
-                result.append((channel, method_frame, properties, body))
-
-            self.amqp_channel.basic_consume(on_message, channel)
+        for channel_name in channels:
+            on_message = partial(self._on_message, result, channel_name)
+            self.amqp_channel.basic_consume(on_message, channel_name)
 
         time_limit = None if block else 0
         self.amqp_connection.process_data_events(time_limit)
@@ -80,6 +77,12 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         properties = BasicProperties(headers=message)
         self.amqp_channel.exchange_declare(group, exchange_type='fanout')
         self.amqp_channel.publish(group, '', '', properties)
+
+    def _on_message(self, result, channel_name, channel, method_frame,
+                    properties, body):
+        self.amqp_channel.basic_ack(method_frame.delivery_tag)
+        self.amqp_channel.stop_consuming()
+        result.append((channel_name, method_frame, properties, body))
 
 
 stubs = [['tg_test', 'tg_test2', 'tg_test3'], ['tg_test', 'tg_test2']]
