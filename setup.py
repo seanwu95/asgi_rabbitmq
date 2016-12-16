@@ -10,4 +10,8 @@ setup(
     author_email='foundation@djangoproject.com',
     maintainer='Artem Malyshev',
     maintainer_email='proofit404@gmail.com',
-    packages=find_packages())
+    packages=find_packages(),
+    install_requires=[
+        'pika>=0.10.0',
+        'asgiref>=1.0.0',
+    ])
