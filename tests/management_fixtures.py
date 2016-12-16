@@ -50,10 +50,12 @@ def remove_vhost(management):
 def vhost(management, remove_vhost, environment):
     """Create random named virtual host."""
 
-    name = ''.join(random.choice(string.ascii_letters) for i in range(8))
-    management.create_vhost(name)
-    remove_vhost.append(name)
     host = environment['RABBITMQ_HOST']
     port = environment['RABBITMQ_PORT']
-    url = 'amqp://%s:%s/%s' % (host, port, name)
+    user = environment['RABBITMQ_USER']
+    vhost = ''.join(random.choice(string.ascii_letters) for i in range(8))
+    url = 'amqp://%s:%s/%s' % (host, port, vhost)
+    management.create_vhost(vhost)
+    management.create_user_permission(user, vhost)
+    remove_vhost.append(vhost)
     return url
