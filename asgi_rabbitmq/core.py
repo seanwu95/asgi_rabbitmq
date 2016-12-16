@@ -1,5 +1,6 @@
 from asgiref.base_layer import BaseChannelLayer
 from pika import BlockingConnection, URLParameters
+from pika.spec import BasicProperties
 
 
 class RabbitmqChannelLayer(BaseChannelLayer):
@@ -24,11 +25,29 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send(self, channel, message):
 
-        pass
+        amqp_channel = self.connection.channel()
+        properties = BasicProperties(headers=message)
+        amqp_channel.queue_declare(channel)
+        amqp_channel.publish('', channel, '', properties)
 
     def receive(self, channels, block=False):
 
-        return None, None
+        amqp_channel = self.connection.channel()
+        result = []
+
+        def on_message(channel, method_frame, properties, body):
+
+            amqp_channel.stop_consuming()
+            result.append((channel, method_frame, properties, body))
+
+        for channel in channels:
+            amqp_channel.basic_consume(on_message, channel)
+
+        amqp_channel.start_consuming()
+        _, method_frame, properties, body = result.pop()
+        channel = method_frame.routing_key
+        message = properties.headers
+        return channel, message
 
     def new_channel(self, pattern):
 
