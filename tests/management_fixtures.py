@@ -7,13 +7,29 @@ from rabbitmq_admin import AdminAPI
 
 
 @pytest.fixture(scope='session')
-def management():
+def environment():
+    """Dict of the interesting environment variables."""
+
+    environment = {
+        'RABBITMQ_HOST': 'localhost',
+        'RABBITMQ_PORT': '5672',
+        'RABBITMQ_MANAGEMENT_PORT': '15672',
+        'RABBITMQ_MANAGEMENT_USER': 'guest',
+        'RABBITMQ_MANAGEMENT_PASSWORD': 'guest',
+    }
+    for varname, default in environment.items():
+        environment[varname] = os.environ.get(varname, default)
+    return environment
+
+
+@pytest.fixture(scope='session')
+def management(environment):
     """RabbitMQ Management Client."""
 
-    hostname = os.environ.get('RABBITMQ_HOST', 'localhost')
-    port = os.environ.get('RABBITMQ_MANAGEMENT_PORT', '15672')
-    user = os.environ.get('RABBITMQ_MANAGEMENT_USER', 'guest')
-    password = os.environ.get('RABBITMQ_MANAGEMENT_PASSWORD', 'guest')
+    hostname = environment['RABBITMQ_HOST']
+    port = environment['RABBITMQ_MANAGEMENT_PORT']
+    user = environment['RABBITMQ_MANAGEMENT_USER']
+    password = environment['RABBITMQ_MANAGEMENT_PASSWORD']
     return AdminAPI('http://%s:%s' % (hostname, port), (user, password))
 
 
