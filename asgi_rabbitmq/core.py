@@ -30,7 +30,9 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         expiration = str(self.expiry * 1000)
         properties = BasicProperties(headers=message, expiration=expiration)
-        self.amqp_channel.queue_declare(channel)
+        reply = self.amqp_channel.queue_declare(channel)
+        if reply.method.message_count >= self.capacity:
+            raise self.ChannelFull
         self.amqp_channel.publish('', channel, '', properties)
 
     def receive(self, channels, block=False):
