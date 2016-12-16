@@ -28,7 +28,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send(self, channel, message):
 
-        properties = BasicProperties(headers=message)
+        expiration = str(self.expiry * 1000)
+        properties = BasicProperties(headers=message, expiration=expiration)
         self.amqp_channel.queue_declare(channel)
         self.amqp_channel.publish('', channel, '', properties)
 
