@@ -13,9 +13,9 @@ def environment():
     environment = {
         'RABBITMQ_HOST': 'localhost',
         'RABBITMQ_PORT': '5672',
-        'RABBITMQ_MANAGEMENT_PORT': '15672',
         'RABBITMQ_USER': 'guest',
         'RABBITMQ_PASSWORD': 'guest',
+        'RABBITMQ_MANAGEMENT_PORT': '15672',
     }
     for varname, default in environment.items():
         environment[varname] = os.environ.get(varname, default)
