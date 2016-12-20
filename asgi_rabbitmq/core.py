@@ -71,10 +71,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         self.amqp_channel.queue_declare(channel)
         self.amqp_channel.queue_unbind(channel, group)
 
-    def group_channels(self, group):
-
-        return stubs.pop(0)  # FIXME: this is test stub!
-
     def send_group(self, group, message):
 
         properties = BasicProperties(headers=message)
@@ -86,6 +82,3 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         self.amqp_channel.basic_ack(method_frame.delivery_tag)
         self.amqp_channel.stop_consuming()
         result.append((channel_name, method_frame, properties, body))
-
-
-stubs = [['tg_test', 'tg_test2', 'tg_test3'], ['tg_test', 'tg_test2']]
