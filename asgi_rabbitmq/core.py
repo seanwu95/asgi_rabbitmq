@@ -42,7 +42,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def receive(self, channels, block=False):
 
-        result = []
+        result = Result()
 
         # FIXME: don't consume on queues from previous `receive`
         # call.  Clean up `amqp_channel` state.
@@ -56,7 +56,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         if not block and not result:
             return None, None
 
-        channel, method_frame, properties, body = result.pop()
+        channel, method_frame, properties, body = result.value
         message = properties.headers
         return channel, message
 
@@ -91,4 +91,15 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                     properties, body):
         self.amqp_channel.basic_ack(method_frame.delivery_tag)
         self.amqp_channel.stop_consuming()
-        result.append((channel_name, method_frame, properties, body))
+        result.value = (channel_name, method_frame, properties, body)
+
+
+class Result(object):
+
+    def __init__(self):
+
+        self.value = None
+
+    def __bool__(self):
+
+        return self.value is not None
