@@ -30,10 +30,15 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         expiration = str(self.expiry * 1000)
         properties = BasicProperties(headers=message, expiration=expiration)
-        reply = self.amqp_channel.queue_declare(channel)
+        reply = self.amqp_channel.queue_declare(queue=channel)
         if reply.method.message_count >= self.capacity:
             raise self.ChannelFull
-        self.amqp_channel.publish('', channel, '', properties)
+        self.amqp_channel.publish(
+            exchange='',
+            routing_key=channel,
+            body='',
+            properties=properties,
+        )
 
     def receive(self, channels, block=False):
 
@@ -43,7 +48,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         # call.  Clean up `amqp_channel` state.
         for channel_name in channels:
             on_message = partial(self._on_message, result, channel_name)
-            self.amqp_channel.basic_consume(on_message, channel_name)
+            self.amqp_channel.basic_consume(on_message, queue=channel_name)
 
         time_limit = None if block else 0
         self.amqp_connection.process_data_events(time_limit)
@@ -61,21 +66,36 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_add(self, group, channel):
 
-        self.amqp_channel.exchange_declare(group, exchange_type='fanout')
-        self.amqp_channel.queue_declare(channel)
-        self.amqp_channel.queue_bind(channel, group)
+        self.amqp_channel.exchange_declare(
+            exchange=group,
+            exchange_type='fanout',
+        )
+        self.amqp_channel.queue_declare(queue=channel)
+        self.amqp_channel.queue_bind(queue=channel, exchange=group)
 
     def group_discard(self, group, channel):
 
-        self.amqp_channel.exchange_declare(group, exchange_type='fanout')
-        self.amqp_channel.queue_declare(channel)
-        self.amqp_channel.queue_unbind(channel, group)
+        # FIXME: Don't create exchange on unbind action.
+        self.amqp_channel.exchange_declare(
+            exchange=group,
+            exchange_type='fanout',
+        )
+        self.amqp_channel.queue_declare(queue=channel)
+        self.amqp_channel.queue_unbind(queue=channel, exchange=group)
 
     def send_group(self, group, message):
 
         properties = BasicProperties(headers=message)
-        self.amqp_channel.exchange_declare(group, exchange_type='fanout')
-        self.amqp_channel.publish(group, '', '', properties)
+        self.amqp_channel.exchange_declare(
+            exchange=group,
+            exchange_type='fanout',
+        )
+        self.amqp_channel.publish(
+            exchange=group,
+            routing_key='',
+            body='',
+            properties=properties,
+        )
 
     def _on_message(self, result, channel_name, channel, method_frame,
                     properties, body):
