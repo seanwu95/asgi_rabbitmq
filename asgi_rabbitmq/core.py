@@ -75,21 +75,11 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_discard(self, group, channel):
 
-        # FIXME: Don't create exchange on unbind action.
-        self.amqp_channel.exchange_declare(
-            exchange=group,
-            exchange_type='fanout',
-        )
-        self.amqp_channel.queue_declare(queue=channel)
         self.amqp_channel.queue_unbind(queue=channel, exchange=group)
 
     def send_group(self, group, message):
 
         properties = BasicProperties(headers=message)
-        self.amqp_channel.exchange_declare(
-            exchange=group,
-            exchange_type='fanout',
-        )
         self.amqp_channel.publish(
             exchange=group,
             routing_key='',

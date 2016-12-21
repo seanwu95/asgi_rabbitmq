@@ -13,3 +13,15 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
     expiry_delay = 1.1
     capacity_limit = 5
+
+    def test_send_to_empty_group(self):
+        """Send to empty group works as usual."""
+
+        self.skip_if_no_extension('groups')
+        self.channel_layer.send_group('tgroup_1', {'value': 'orange'})
+
+    def test_discard_from_empty_group(self):
+        """Discard from empty group works as usual."""
+
+        self.skip_if_no_extension('groups')
+        self.channel_layer.group_discard('tgroup_2', 'tg_test3')
