@@ -4,9 +4,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SECRET_KEY = 'w&$y12g7y@xu3!_mkcq#h%vma+@vt((k_%dg%s+=*5zi7$m&g&'
 
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -55,9 +55,12 @@ DATABASES = {
 }
 
 CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "asgiref.inmemory.ChannelLayer",
-        "ROUTING": "demo.routing.routes",
+    'default': {
+        'BACKEND': 'asgi_ipc.IPCChannelLayer',
+        'ROUTING': 'demo.routing.routes',
+        'CONFIG': {
+            'prefix': 'demo',
+        },
     },
 }
 
