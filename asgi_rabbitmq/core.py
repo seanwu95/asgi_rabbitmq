@@ -51,7 +51,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             self.amqp_channel = self.amqp_connection.channel()
         result = Result()
         callbacks = {
-            channel_name: partial(self._on_message, result, channel_name)
+            channel_name: partial(on_message, self, result, channel_name)
             for channel_name in channels
         }
 
@@ -127,11 +127,12 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             properties=properties,
         )
 
-    def _on_message(self, result, channel_name, channel, method_frame,
-                    properties, body):
-        self.amqp_channel.basic_ack(method_frame.delivery_tag)
-        self.amqp_channel.stop_consuming()
-        result.value = (channel_name, method_frame, properties, body)
+
+def on_message(layer, result, channel_name, channel, method_frame, properties,
+               body):
+    layer.amqp_channel.basic_ack(method_frame.delivery_tag)
+    layer.amqp_channel.stop_consuming()
+    result.value = (channel_name, method_frame, properties, body)
 
 
 class Result(object):
