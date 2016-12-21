@@ -1,56 +1,56 @@
-import threading
+import multiprocessing
 
 import pytest
 from channels import DEFAULT_CHANNEL_LAYER, channel_layers
 from channels.worker import Worker
 from daphne.server import Server
 
+from demo.asgi import channel_layer
+
 
 @pytest.fixture(scope='session')
 def asgi_server():
     """Daphne Live Server."""
 
-    channel_layer = channel_layers[DEFAULT_CHANNEL_LAYER]
-
-    worker_thread = WorkerThread(channel_layer)
-    worker_thread.daemon = True
-    worker_thread.start()
-
-    daphne_thread = DaphneThread(channel_layer)
-    daphne_thread.daemon = True
-    daphne_thread.start()
-
-    return daphne_thread.server_addr
+    worker_process = WorkerProcess()
+    worker_process.start()
+    server_process = DaphneProcess()
+    server_process.start()
+    return server_process.host, server_process.port
 
 
-class DaphneThread(threading.Thread):
+class DaphneProcess(multiprocessing.Process):
 
-    def __init__(self, channel_layer):
+    host = '0.0.0.0'
+    port = 8000
 
-        self.channel_layer = channel_layer
-        self.server_addr = None
-        super(DaphneThread, self).__init__()
+    def __init__(self, *args, **kwargs):
+
+        super(DaphneProcess, self).__init__(*args, **kwargs)
+        self.daemon = True
 
     def run(self):
 
         server = Server(
-            channel_layer=self.channel_layer,
+            channel_layer=channel_layer,
+            host=self.host,
+            port=self.port,
             signal_handlers=False,
         )
-        self.server_addr = server.host, server.port
         server.run()
 
 
-class WorkerThread(threading.Thread):
+class WorkerProcess(multiprocessing.Process):
 
-    def __init__(self, channel_layer):
-        self.channel_layer = channel_layer
-        super(WorkerThread, self).__init__()
+    def __init__(self, *args, **kwargs):
+
+        super(WorkerProcess, self).__init__(*args, **kwargs)
+        self.daemon = True
 
     def run(self):
 
         worker = Worker(
-            channel_layer=self.channel_layer,
+            channel_layer=channel_layers[DEFAULT_CHANNEL_LAYER],
             signal_handlers=False,
         )
         worker.ready()
