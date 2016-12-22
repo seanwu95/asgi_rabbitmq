@@ -14,4 +14,5 @@ setup(
     install_requires=[
         'pika>=0.10.0',
         'asgiref>=1.0.0',
+        'msgpack-python',
     ])
