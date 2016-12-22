@@ -156,6 +156,8 @@ class Result(object):
 
         return self.value is not None
 
+    __nonzero__ = __bool__
+
 
 def not_found_error(exception):
 
