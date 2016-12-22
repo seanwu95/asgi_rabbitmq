@@ -160,3 +160,8 @@ class Result(object):
 def not_found_error(exception):
 
     return exception.args[0] == 404
+
+
+# TODO: is it optimal to read bytes from content frame, call python
+# decode method to convert it to string and than parse it with
+# msgpack?  We should minimize useless work on message receive.
