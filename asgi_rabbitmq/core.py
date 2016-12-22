@@ -2,6 +2,7 @@ import random
 import string
 from functools import partial
 
+import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from pika import BlockingConnection, URLParameters
 from pika.exceptions import ChannelClosed
@@ -33,15 +34,16 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         if not self.amqp_channel.is_open:  # FIXME: duplication :(
             self.amqp_channel = self.amqp_connection.channel()
-        expiration = str(self.expiry * 1000)
-        properties = BasicProperties(headers=message, expiration=expiration)
         reply = self.amqp_channel.queue_declare(queue=channel)
         if reply.method.message_count >= self.capacity:
             raise self.ChannelFull
+        body = self.serialize(message)
+        expiration = str(self.expiry * 1000)
+        properties = BasicProperties(expiration=expiration)
         self.amqp_channel.publish(
             exchange='',
             routing_key=channel,
-            body='',
+            body=body,
             properties=properties,
         )
 
@@ -83,7 +85,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             return None, None
 
         channel, method_frame, properties, body = result.value
-        message = properties.headers
+        message = self.deserialize(body)
         return channel, message
 
     def new_channel(self, pattern):
@@ -119,13 +121,22 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send_group(self, group, message):
 
-        properties = BasicProperties(headers=message)
+        # FIXME: What about expiration property here?
+        body = self.serialize(message)
         self.amqp_channel.publish(
             exchange=group,
             routing_key='',
-            body='',
-            properties=properties,
+            body=body,
         )
+
+    def serialize(self, message):
+
+        value = msgpack.packb(message, use_bin_type=True)
+        return value
+
+    def deserialize(self, message):
+
+        return msgpack.unpackb(message, encoding="utf8")
 
 
 def on_message(layer, result, channel_name, channel, method_frame, properties,
