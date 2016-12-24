@@ -1,0 +1,30 @@
+language: python
+python:
+  - 2.7
+  - 3.4
+  - 3.5
+matrix:
+  fast_finish: true
+env:
+  matrix:
+    - TOXENV=py27-django18
+    - TOXENV=py27-django19
+    - TOXENV=py27-django110
+    - TOXENV=py34-django18
+    - TOXENV=py34-django19
+    - TOXENV=py34-django110
+    - TOXENV=py35-django18
+    - TOXENV=py35-django19
+    - TOXENV=py35-django110
+cache:
+  directories:
+  - $HOME/.cache/pip
+before_cache:
+  - rm -f $HOME/.cache/pip/log/debug.log
+install:
+  - pip install -U pip wheel
+  - pip install .
+  - pip install -r requirements/qa.txt
+  - pip install -r requirements/ci.txt
+script:
+  - coverage run -m pytest
