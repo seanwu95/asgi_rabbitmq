@@ -27,8 +27,6 @@ cache:
   - $HOME/.cache/pip/wheels
 install:
   - pip install -U pip wheel
-  - pip install .
-  - pip install -r requirements/qa.txt
-  - pip install -r requirements/ci.txt
+  - pip install tox
 script:
   - tox
