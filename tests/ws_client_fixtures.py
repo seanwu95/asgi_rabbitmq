@@ -1,14 +1,9 @@
-import threading
+from multiprocessing import Process, Queue
 
 import pytest
 from autobahn.twisted.websocket import (WebSocketClientFactory,
                                         WebSocketClientProtocol)
 from twisted.internet import reactor, threads
-
-try:
-    from queue import Queue
-except ImportError:
-    from Queue import Queue
 
 
 @pytest.yield_fixture(scope='session')
@@ -25,16 +20,15 @@ def ws_client(asgi_server):
         return responses.get(timeout=30)
 
     host, port = asgi_server
-    thread = WSClientThread(requests, responses, host, port)
-    thread.daemon = True
-    thread.start()
+    ws_process = WSClientProcess(requests, responses, host, port)
+    ws_process.start()
     yield client
-    thread.terminate()
+    ws_process.terminate()
 
 
-class WSClientThread(threading.Thread):
+class WSClientProcess(Process):
     """
-    Thread holding Twisted reactor with WebSocket client.
+    Process holding Twisted reactor with WebSocket client.
 
     Necessary for ping/pong frames to work.
     """
@@ -45,14 +39,15 @@ class WSClientThread(threading.Thread):
         self.responses = responses
         self.host = host
         self.port = port
-        super(WSClientThread, self).__init__()
+        super(WSClientProcess, self).__init__()
+        self.daemon = True
 
     def run(self):
 
         factory = WebSocketClientFactory()
         factory.protocol = type('BoundFixtureProtocol', (FixtureProtocol,), {
-            '_requests': self.requests,
-            '_responses': self.responses,
+            'requests': self.requests,
+            'responses': self.responses,
         })
         reactor.connectTCP(self.host, self.port, factory)
         reactor.run(installSignalHandlers=False)
@@ -64,13 +59,10 @@ class WSClientThread(threading.Thread):
 
 class FixtureProtocol(WebSocketClientProtocol):
 
-    _requests = Queue()
-    _responses = Queue()
-
     def onOpen(self):
 
-        threads.deferToThread(self._requests.get).addCallback(self.sendMessage)
+        threads.deferToThread(self.requests.get).addCallback(self.sendMessage)
 
     def onMessage(self, payload, isBinary):
 
-        self._responses.put(payload)
+        self.responses.put(payload)
