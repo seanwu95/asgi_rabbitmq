@@ -13,6 +13,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     extensions = ['groups', 'twisted']
 
+    dead_letters = 'dead-letters'
+
     def __init__(self,
                  url,
                  expiry=60,
@@ -108,6 +110,27 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_add(self, group, channel):
 
+        self.create_dead_letters()
+        expire_marker = 'expire.bind.%s.%s' % (group, channel)
+        ttl = self.group_expiry * 1000
+        self.amqp_channel.queue_declare(
+            queue=expire_marker,
+            arguments={
+                'x-dead-letter-exchange': self.dead_letters,
+                'x-message-ttl': ttl,
+                'x-expires': ttl + 500,
+                'x-max-length': 1,
+            })
+        body = self.serialize({
+            'group': group,
+            'channel': channel,
+        })
+        self.amqp_channel.publish(
+            exchange='',
+            routing_key=expire_marker,
+            body=body,
+        )
+        # Actual logic here.
         self.amqp_channel.exchange_declare(
             exchange=group,
             exchange_type='fanout',
@@ -121,12 +144,42 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send_group(self, group, message):
 
+        # TODO: Move to something like special method.
+        # FIXME: Ignore max-length dead-letters.
+        def callback(channel, method_frame, properties, body):
+
+            message = self.deserialize(body)
+            self.group_discard(**message)
+
+        try:
+            self.amqp_channel.basic_consume(callback, queue=self.dead_letters)
+        except ChannelClosed as e:
+            if not_found_error(e):
+                # FIXME: duplication :(
+                self.amqp_channel = self.amqp_connection.channel()
+            else:
+                raise
+
+        # TODO: how many times we should run this?
+        self.amqp_connection.process_data_events(0)
         # FIXME: What about expiration property here?
         body = self.serialize(message)
         self.amqp_channel.publish(
             exchange=group,
             routing_key='',
             body=body,
+        )
+
+    def create_dead_letters(self):
+
+        self.amqp_channel.exchange_declare(
+            exchange=self.dead_letters,
+            exchange_type='fanout',
+        )
+        self.amqp_channel.queue_declare(queue=self.dead_letters)
+        self.amqp_channel.queue_bind(
+            queue=self.dead_letters,
+            exchange=self.dead_letters,
         )
 
     def serialize(self, message):
@@ -136,11 +189,12 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def deserialize(self, message):
 
-        return msgpack.unpackb(message, encoding="utf8")
+        return msgpack.unpackb(message, encoding='utf8')
 
 
 def on_message(layer, result, channel_name, channel, method_frame, properties,
                body):
+
     layer.amqp_channel.basic_ack(method_frame.delivery_tag)
     layer.amqp_channel.stop_consuming()
     result.value = (channel_name, method_frame, properties, body)
