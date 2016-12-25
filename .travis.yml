@@ -1,32 +1,25 @@
 language: python
+python:
+  - 2.7
+  - 3.4
+  - 3.5
 services:
   - rabbitmq
-matrix:
-  fast_finish: true
-  include:
-    - python: 2.7
-      env: TOXENV=py27-django18
-    - python: 2.7
-      env: TOXENV=py27-django19
-    - python: 2.7
-      env: TOXENV=py27-django110
-    - python: 3.4
-      env: TOXENV=py34-django18
-    - python: 3.4
-      env: TOXENV=py34-django19
-    - python: 3.4
-      env: TOXENV=py34-django110
-    - python: 3.5
-      env: TOXENV=py35-django18
-    - python: 3.5
-      env: TOXENV=py35-django19
-    - python: 3.5
-      env: TOXENV=py35-django110
+env:
+  matrix:
+    - DJANGO_VERSION=Django>=1.8,<1.9
+    - DJANGO_VERSION=Django>=1.9,<1.10
+    - DJANGO_VERSION=Django>=1.10,<1.11
 cache:
   directories:
   - $HOME/.cache/pip/wheels
 install:
   - pip install -U pip wheel
-  - pip install tox
+  - pip install .
+  - pip install -r requirements/qa.txt
+  - pip install -r requirements/ci.txt
+  - pip install "${DJANGO_VERSION}"
 script:
-  - tox
+  - coverage run -m pytest
+after_success:
+  - codecov
