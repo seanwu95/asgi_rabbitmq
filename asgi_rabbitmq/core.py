@@ -36,7 +36,10 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         if not self.amqp_channel.is_open:  # FIXME: duplication :(
             self.amqp_channel = self.amqp_connection.channel()
-        reply = self.amqp_channel.queue_declare(queue=channel)
+        reply = self.amqp_channel.queue_declare(
+            queue=channel,
+            arguments={'x-dead-letter-exchange': self.dead_letters},
+        )
         if reply.method.message_count >= self.capacity:
             raise self.ChannelFull
         body = self.serialize(message)
@@ -110,6 +113,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_add(self, group, channel):
 
+        # FIXME: move to the method.
         self.create_dead_letters()
         expire_marker = 'expire.bind.%s.%s' % (group, channel)
         ttl = self.group_expiry * 1000
@@ -136,12 +140,20 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             exchange=group,
             exchange_type='fanout',
         )
-        self.amqp_channel.queue_declare(queue=channel)
-        self.amqp_channel.queue_bind(queue=channel, exchange=group)
+        self.amqp_channel.exchange_declare(
+            exchange=channel,
+            exchange_type='fanout',
+        )
+        self.amqp_channel.queue_declare(
+            queue=channel,
+            arguments={'x-dead-letter-exchange': self.dead_letters},
+        )
+        self.amqp_channel.exchange_bind(destination=channel, source=group)
+        self.amqp_channel.queue_bind(queue=channel, exchange=channel)
 
     def group_discard(self, group, channel):
 
-        self.amqp_channel.queue_unbind(queue=channel, exchange=group)
+        self.amqp_channel.exchange_delete(exchange=channel)
 
     def send_group(self, group, message):
 
@@ -149,8 +161,13 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         # FIXME: Ignore max-length dead-letters.
         def callback(channel, method_frame, properties, body):
 
-            message = self.deserialize(body)
-            self.group_discard(**message)
+            # FIXME: what the hell zero means here?
+            queue = properties.headers['x-death'][0]['queue']
+            if is_expire_marker(queue):
+                message = self.deserialize(body)
+                self.group_discard(**message)
+            else:
+                self.amqp_channel.exchange_delete(exchange=queue)
 
         try:
             self.amqp_channel.basic_consume(callback, queue=self.dead_letters)
@@ -217,6 +234,11 @@ class Result(object):
 def not_found_error(exception):
 
     return exception.args[0] == 404
+
+
+def is_expire_marker(queue):
+
+    return queue.startswith('expire.bind.')
 
 
 # TODO: is it optimal to read bytes from content frame, call python

@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from asgi_rabbitmq import RabbitmqChannelLayer
 from asgiref.conformance import ConformanceTestCase
@@ -25,6 +27,30 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
         self.skip_if_no_extension('groups')
         self.channel_layer.group_discard('tgroup_2', 'tg_test3')
+
+    def test_group_persistence_message_expiry(self):
+        """
+        Discard channel from all its groups when first message expires in
+        channel.
+        """
+
+        # Setup group membership.
+        self.skip_if_no_extension('groups')
+        self.channel_layer.group_add('tgme_group1', 'tgme_test')
+        self.channel_layer.group_add('tgme_group2', 'tgme_test')
+        self.channel_layer.send('tgme_test', {'hello': 'world'})
+        # Wait until message in the channel expires.
+        time.sleep(self.channel_layer.expiry)
+        # Channel lost its membership in the group #1.
+        self.channel_layer.send_group('tgme_group1', {'hello': 'world1'})
+        channel, message = self.channel_layer.receive(['tgme_test'])
+        self.assertIs(channel, None)
+        self.assertIs(message, None)
+        # Channel lost its membership in the group #2.
+        self.channel_layer.send_group('tgme_group2', {'hello': 'world2'})
+        channel, message = self.channel_layer.receive(['tgme_test'])
+        self.assertIs(channel, None)
+        self.assertIs(message, None)
 
     def test_group_channels(self):
 
