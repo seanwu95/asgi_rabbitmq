@@ -56,3 +56,8 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
         # TODO: figure out how to check group membership.
         self.raiseSkip('Not supported by RabbitMQ')
+
+    # FIXME: test_capacity fails occasionally.
+    #
+    # Maybe first message succeeds to expire so message count don't
+    # cross capacity border.
