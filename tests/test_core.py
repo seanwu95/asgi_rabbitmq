@@ -10,11 +10,13 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     @pytest.fixture(autouse=True)
     def init_conformance_test(self, vhost):
 
+        url = '%s?heartbeat_interval=%d' % (vhost, self.heartbeat_interval)
         self.channel_layer = RabbitmqChannelLayer(
-            vhost, expiry=1, group_expiry=2, capacity=5)
+            url, expiry=1, group_expiry=2, capacity=self.capacity_limit)
 
     expiry_delay = 1.1
     capacity_limit = 5
+    heartbeat_interval = 15
 
     def test_send_to_empty_group(self):
         """Send to empty group works as usual."""
@@ -51,6 +53,21 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         channel, message = self.channel_layer.receive(['tgme_test'])
         self.assertIs(channel, None)
         self.assertIs(message, None)
+
+    @pytest.mark.xfail
+    def test_connection_heartbeats(self):
+        """
+        We must answer for RabbitMQ heartbeat frames responsively.
+        Otherwise connection will be closed by server.
+        """
+
+        self.channel_layer.send('x', {'foo': 'bar'})
+        channel, message = self.channel_layer.receive(['x'])
+        time.sleep(self.heartbeat_interval * 3)
+        # Code below will throw an exception if we don't send
+        # heartbeat frames during sleep.
+        self.channel_layer.send('x', {'baz': 'quux'})
+        channel, message = self.channel_layer.receive(['x'])
 
     def test_group_channels(self):
 
