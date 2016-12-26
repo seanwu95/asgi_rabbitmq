@@ -1,5 +1,5 @@
 *~
-.tox/
+.tox*/
 __pycache__/
 *.egg-info/
 .cache/
