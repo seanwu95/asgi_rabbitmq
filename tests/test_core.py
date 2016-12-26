@@ -69,10 +69,11 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         self.channel_layer.send('x', {'baz': 'quux'})
         channel, message = self.channel_layer.receive(['x'])
 
+    @pytest.mark.xfail
     def test_group_channels(self):
 
         # TODO: figure out how to check group membership.
-        self.raiseSkip('Not supported by RabbitMQ')
+        super(RabbitmqChannelLayerTest, self).test_group_channels()
 
     # FIXME: test_capacity fails occasionally.
     #
