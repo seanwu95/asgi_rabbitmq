@@ -11,7 +11,7 @@ from pika.spec import BasicProperties
 
 class RabbitmqChannelLayer(BaseChannelLayer):
 
-    extensions = ['groups', 'twisted']
+    extensions = ['groups']
 
     dead_letters = 'dead-letters'
 
