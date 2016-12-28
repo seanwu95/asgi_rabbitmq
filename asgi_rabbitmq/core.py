@@ -250,8 +250,11 @@ def is_expire_marker(queue):
 def worker_start_hook(sender, **kwargs):
     """Declare necessary queues we gonna listen."""
 
-    layer = sender.channel_layer
-    channels = sender.apply_channel_filters(layer.router.channels)
+    layer_wrapper = sender.channel_layer
+    layer = layer_wrapper.channel_layer
+    if not isinstance(layer, RabbitmqChannelLayer):
+        return
+    channels = sender.apply_channel_filters(layer_wrapper.router.channels)
     for channel in channels:
         # FIXME: duplication, encapsulation violation.
         layer.amqp_channel.queue_declare(

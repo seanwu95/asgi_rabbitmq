@@ -2,6 +2,7 @@ import time
 from collections import defaultdict
 
 import pytest
+from asgi_ipc import IPCChannelLayer
 from asgi_rabbitmq import RabbitmqChannelLayer
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
@@ -115,6 +116,26 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
             'websocket.receive',
             'websocket.connect',
         }
+
+    def test_skip_another_layer_on_worker_ready(self):
+        """
+        Don't try to declare rabbit queues if worker uses another layer
+        implementation.
+        """
+
+        wrapper = ChannelLayerWrapper(
+            channel_layer=IPCChannelLayer(),
+            alias='default',
+            # NOTE: Similar to `channels.routing.Router.check_default` result.
+            routing=[
+                route('http.request', null_consumer),
+                route('websocket.connect', null_consumer),
+                route('websocket.receive', null_consumer),
+            ],
+        )
+        worker = Worker(channel_layer=wrapper, signal_handlers=False)
+        worker.ready()
+        assert not self.defined_queues
 
     # FIXME: test_capacity fails occasionally.
     #
