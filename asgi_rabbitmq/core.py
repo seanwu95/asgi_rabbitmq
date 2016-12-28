@@ -74,13 +74,10 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                     self.amqp_channel.basic_consume(
                         callback, queue=channel_name)
                 except ChannelClosed as e:
-                    if not_found_error(e):
-                        del callbacks[channel_name]
-                        # FIXME: duplication :(
-                        self.amqp_channel = self.amqp_connection.channel()
-                        break
-                    else:
-                        raise
+                    del callbacks[channel_name]
+                    # FIXME: duplication :(
+                    self.amqp_channel = self.amqp_connection.channel()
+                    break
             else:
                 consumed = True
 
@@ -107,10 +104,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             except ChannelClosed as e:
                 # FIXME: Channel is always closed on next retry.  Open
                 # new one here.
-                if not_found_error(e):
-                    return channel
-                else:
-                    raise
+                return channel
 
     def group_add(self, group, channel):
 
@@ -173,11 +167,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         try:
             self.amqp_channel.basic_consume(callback, queue=self.dead_letters)
         except ChannelClosed as e:
-            if not_found_error(e):
-                # FIXME: duplication :(
-                self.amqp_channel = self.amqp_connection.channel()
-            else:
-                raise
+            # FIXME: duplication :(
+            self.amqp_channel = self.amqp_connection.channel()
 
         # TODO: how many times we should run this?
         self.amqp_connection.process_data_events(0)
@@ -230,11 +221,6 @@ class Result(object):
         return self.value is not None
 
     __nonzero__ = __bool__
-
-
-def not_found_error(exception):
-
-    return exception.args[0] == 404
 
 
 def is_expire_marker(queue):
