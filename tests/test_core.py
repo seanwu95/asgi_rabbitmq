@@ -1,18 +1,38 @@
 import time
+from collections import defaultdict
 
 import pytest
 from asgi_rabbitmq import RabbitmqChannelLayer
 from asgiref.conformance import ConformanceTestCase
+from channels.asgi import ChannelLayerWrapper
+from channels.routing import null_consumer, route
+from channels.worker import Worker
 
 
 class RabbitmqChannelLayerTest(ConformanceTestCase):
 
     @pytest.fixture(autouse=True)
-    def init_conformance_test(self, vhost):
+    def init_conformance_test(self, vhost, management):
 
         url = '%s?heartbeat_interval=%d' % (vhost, self.heartbeat_interval)
         self.channel_layer = RabbitmqChannelLayer(
-            url, expiry=1, group_expiry=2, capacity=self.capacity_limit)
+            url,
+            expiry=1,
+            group_expiry=2,
+            capacity=self.capacity_limit,
+        )
+        self.management = management
+
+    @property
+    def defined_queues(self):
+        """Get queue names defined in current vhost."""
+
+        definitions = self.management.get_definitions()
+        queue_definitions = defaultdict(set)
+        for queue in definitions['queues']:
+            queue_definitions[queue['vhost']].add(queue['name'])
+        queues = queue_definitions[self.channel_layer.parameters.virtual_host]
+        return queues
 
     expiry_delay = 1.1
     capacity_limit = 5
@@ -74,6 +94,27 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
         # TODO: figure out how to check group membership.
         super(RabbitmqChannelLayerTest, self).test_group_channels()
+
+    def test_declare_queues_on_worker_ready(self):
+        """Declare necessary queues after worker start."""
+
+        wrapper = ChannelLayerWrapper(
+            channel_layer=self.channel_layer,
+            alias='default',
+            # NOTE: Similar to `channels.routing.Router.check_default` result.
+            routing=[
+                route('http.request', null_consumer),
+                route('websocket.connect', null_consumer),
+                route('websocket.receive', null_consumer),
+            ],
+        )
+        worker = Worker(channel_layer=wrapper, signal_handlers=False)
+        worker.ready()
+        assert self.defined_queues == {
+            'http.request',
+            'websocket.receive',
+            'websocket.connect',
+        }
 
     # FIXME: test_capacity fails occasionally.
     #

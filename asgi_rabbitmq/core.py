@@ -4,6 +4,7 @@ from functools import partial
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
+from channels.signals import worker_ready
 from pika import BlockingConnection, URLParameters
 from pika.exceptions import ChannelClosed
 from pika.spec import BasicProperties
@@ -28,8 +29,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             capacity=capacity,
             channel_capacity=channel_capacity,
         )
-        parameters = URLParameters(url)
-        self.amqp_connection = BlockingConnection(parameters)
+        self.parameters = URLParameters(url)
+        self.amqp_connection = BlockingConnection(self.parameters)
         self.amqp_channel = self.amqp_connection.channel()
 
     def send(self, channel, message):
@@ -244,3 +245,21 @@ def is_expire_marker(queue):
 # TODO: is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with
 # msgpack?  We should minimize useless work on message receive.
+
+
+def worker_start_hook(sender, **kwargs):
+    """Declare necessary queues we gonna listen."""
+
+    layer = sender.channel_layer
+    channels = sender.apply_channel_filters(layer.router.channels)
+    for channel in channels:
+        # FIXME: duplication, encapsulation violation.
+        layer.amqp_channel.queue_declare(
+            queue=channel,
+            arguments={'x-dead-letter-exchange': layer.dead_letters},
+        )
+
+
+# FIXME: This must be optional since we don't require channels package
+# to be installed.
+worker_ready.connect(worker_start_hook)
