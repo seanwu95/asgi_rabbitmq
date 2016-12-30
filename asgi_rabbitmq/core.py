@@ -233,25 +233,25 @@ class Layer(object):
 
     dead_letters = 'dead-letters'
 
-    def declare_dead_letters(self, channel):
+    def declare_dead_letters(self, amqp_channel):
 
         declare_exchange = partial(
-            channel.exchange_declare,
+            amqp_channel.exchange_declare,
             exchange=self.dead_letters,
             exchange_type='fanout',
         )
         declare_queue = partial(
-            channel.queue_declare,
+            amqp_channel.queue_declare,
             queue=self.dead_letters,
         )
         do_bind = partial(
-            channel.queue_bind,
+            amqp_channel.queue_bind,
             queue=self.dead_letters,
             exchange=self.dead_letters,
         )
         consume = partial(
             self.consume_from_dead_letters,
-            channel=channel,
+            amqp_channel=amqp_channel,
         )
         declare_exchange(
             lambda method_frame: declare_queue(
@@ -261,19 +261,31 @@ class Layer(object):
             ),
         )
 
-    def consume_from_dead_letters(self, channel):
+    def consume_from_dead_letters(self, amqp_channel):
 
-        channel.basic_consume(self.on_dead_letter, queue=self.dead_letters)
+        amqp_channel.basic_consume(
+            self.on_dead_letter,
+            queue=self.dead_letters,
+        )
 
-    def on_dead_letter(self, channel, method_frame, properties, body):
+    def on_dead_letter(self, amqp_channel, method_frame, properties, body):
 
+        amqp_channel.basic_ack(method_frame.delivery_tag)
         # FIXME: what the hell zero means here?
         queue = properties.headers['x-death'][0]['queue']
         if is_expire_marker(queue):
             message = self.deserialize(body)
-            self.group_discard(**message)
+            self.group_discard(amqp_channel, **message)
         else:
-            self.amqp_channel.exchange_delete(exchange=queue)
+            amqp_channel.exchange_delete(exchange=queue)
+
+    def group_discard(self, amqp_channel, group, channel):
+
+        amqp_channel.exchange_delete(exchange=channel)
+
+    def deserialize(self, message):
+
+        return msgpack.unpackb(message, encoding='utf8')
 
 
 class AMQP(object):
