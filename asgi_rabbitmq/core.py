@@ -1,11 +1,12 @@
 import random
 import string
+import threading
 from functools import partial
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
-from pika import BlockingConnection, URLParameters
+from pika import BlockingConnection, SelectConnection, URLParameters
 from pika.exceptions import ChannelClosed
 from pika.spec import BasicProperties
 
@@ -226,6 +227,85 @@ class Result(object):
 def is_expire_marker(queue):
 
     return queue.startswith('expire.bind.')
+
+
+class Layer(object):
+
+    dead_letters = 'dead-letters'
+
+    def declare_dead_letters(self, channel):
+
+        declare_exchange = partial(
+            channel.exchange_declare,
+            exchange=self.dead_letters,
+            exchange_type='fanout',
+        )
+        declare_queue = partial(
+            channel.queue_declare,
+            queue=self.dead_letters,
+        )
+        do_bind = partial(
+            channel.queue_bind,
+            queue=self.dead_letters,
+            exchange=self.dead_letters,
+        )
+        consume = partial(
+            self.consume_from_dead_letters,
+            channel=channel,
+        )
+        declare_exchange(
+            lambda method_frame: declare_queue(
+                lambda method_frame: do_bind(
+                    lambda method_frame: consume,
+                ),
+            ),
+        )
+
+    def consume_from_dead_letters(self, channel):
+
+        channel.basic_consume(self.on_dead_letter, queue=self.dead_letters)
+
+    def on_dead_letter(self, channel, method_frame, properties, body):
+
+        # FIXME: what the hell zero means here?
+        queue = properties.headers['x-death'][0]['queue']
+        if is_expire_marker(queue):
+            message = self.deserialize(body)
+            self.group_discard(**message)
+        else:
+            self.amqp_channel.exchange_delete(exchange=queue)
+
+
+class AMQP(object):
+
+    layer_cls = Layer
+
+    def __init__(self, url):
+
+        self.layer = self.layer_cls()
+        self.parameters = URLParameters(url)
+        self.connection = SelectConnection(
+            parameters=self.parameters,
+            on_open_callback=self.on_connection_open,
+        )
+
+    def on_connection_open(self, connection):
+
+        connection.channel(self.on_channel_open)
+
+    def on_channel_open(self, channel):
+
+        self.layer.declare_dead_letters(channel)
+
+
+class ConnectionThread(threading.Thread):
+    """
+    Thread holding connection.
+
+    Separate heartbeat frames processing from actual work.
+    """
+
+    pass
 
 
 # TODO: is it optimal to read bytes from content frame, call python
