@@ -256,7 +256,7 @@ class Layer(object):
         declare_exchange(
             lambda method_frame: declare_queue(
                 lambda method_frame: do_bind(
-                    lambda method_frame: consume,
+                    lambda method_frame: consume(),
                 ),
             ),
         )
