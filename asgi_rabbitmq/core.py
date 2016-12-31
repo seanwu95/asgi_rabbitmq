@@ -233,6 +233,39 @@ class Layer(object):
 
     dead_letters = 'dead-letters'
 
+    def __init__(self, expiry, group_expiry, capacity, channel_capacity):
+
+        self.expiry = expiry
+        self.group_expiry = group_expiry
+        self.capacity = capacity
+        self.channel_capacity = channel_capacity
+
+    def send(self, amqp_channel, channel, message):
+
+        # FIXME: Avoid constant queue declaration.
+        declare_queue = partial(
+            amqp_channel.queue_declare,
+            queue=channel,
+            arguments={'x-dead-letter-exchange': self.dead_letters},
+        )
+
+        # FIXME: remove nested function definition.
+        def callback(method_frame):
+            if method_frame.method.message_count >= self.capacity:
+                # FIXME: raise this exception in the calling thread
+                raise self.ChannelFull
+            body = self.serialize(message)
+            expiration = str(self.expiry * 1000)
+            properties = BasicProperties(expiration=expiration)
+            amqp_channel.basic_publish(
+                exchange='',
+                routing_key=channel,
+                body=body,
+                properties=properties,
+            )
+
+        declare_queue(callback)
+
     def declare_dead_letters(self, amqp_channel):
 
         declare_exchange = partial(
@@ -283,6 +316,11 @@ class Layer(object):
 
         amqp_channel.exchange_delete(exchange=channel)
 
+    def serialize(self, message):
+
+        value = msgpack.packb(message, use_bin_type=True)
+        return value
+
     def deserialize(self, message):
 
         return msgpack.unpackb(message, encoding='utf8')
@@ -292,14 +330,23 @@ class AMQP(object):
 
     layer_cls = Layer
 
-    def __init__(self, url):
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
 
-        self.layer = self.layer_cls()
+        self.layer = self.layer_cls(
+            expiry,
+            group_expiry,
+            capacity,
+            channel_capacity,
+        )
         self.parameters = URLParameters(url)
         self.connection = SelectConnection(
             parameters=self.parameters,
             on_open_callback=self.on_connection_open,
         )
+
+    def run(self):
+
+        self.connection.ioloop.start()
 
     def on_connection_open(self, connection):
 
