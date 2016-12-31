@@ -229,16 +229,33 @@ def is_expire_marker(queue):
     return queue.startswith('expire.bind.')
 
 
-class Layer(object):
+class AMQP(object):
 
     dead_letters = 'dead-letters'
 
-    def __init__(self, expiry, group_expiry, capacity, channel_capacity):
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
 
+        self.parameters = URLParameters(url)
+        self.connection = SelectConnection(
+            parameters=self.parameters,
+            on_open_callback=self.on_connection_open,
+        )
         self.expiry = expiry
         self.group_expiry = group_expiry
         self.capacity = capacity
         self.channel_capacity = channel_capacity
+
+    def run(self):
+
+        self.connection.ioloop.start()
+
+    def on_connection_open(self, connection):
+
+        connection.channel(self.on_channel_open)
+
+    def on_channel_open(self, channel):
+
+        self.declare_dead_letters(channel)
 
     def send(self, amqp_channel, channel, message):
 
@@ -324,37 +341,6 @@ class Layer(object):
     def deserialize(self, message):
 
         return msgpack.unpackb(message, encoding='utf8')
-
-
-class AMQP(object):
-
-    layer_cls = Layer
-
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
-
-        self.layer = self.layer_cls(
-            expiry,
-            group_expiry,
-            capacity,
-            channel_capacity,
-        )
-        self.parameters = URLParameters(url)
-        self.connection = SelectConnection(
-            parameters=self.parameters,
-            on_open_callback=self.on_connection_open,
-        )
-
-    def run(self):
-
-        self.connection.ioloop.start()
-
-    def on_connection_open(self, connection):
-
-        connection.channel(self.on_channel_open)
-
-    def on_channel_open(self, channel):
-
-        self.layer.declare_dead_letters(channel)
 
 
 class ConnectionThread(threading.Thread):
