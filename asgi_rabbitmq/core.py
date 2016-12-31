@@ -10,6 +10,11 @@ from pika import BlockingConnection, SelectConnection, URLParameters
 from pika.exceptions import ChannelClosed
 from pika.spec import BasicProperties
 
+try:
+    import queue
+except ImportError:
+    import Queue as queue
+
 
 class RabbitmqChannelLayer(BaseChannelLayer):
 
@@ -233,7 +238,8 @@ class AMQP(object):
 
     dead_letters = 'dead-letters'
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
+                 method_calls):
 
         self.parameters = URLParameters(url)
         self.connection = SelectConnection(
@@ -244,6 +250,7 @@ class AMQP(object):
         self.group_expiry = group_expiry
         self.capacity = capacity
         self.channel_capacity = channel_capacity
+        self.method_calls = method_calls
 
     def run(self):
 
@@ -252,10 +259,26 @@ class AMQP(object):
     def on_connection_open(self, connection):
 
         connection.channel(self.on_channel_open)
+        connection.add_timeout(
+            0.01,
+            partial(self.check_method_call, connection),
+        )
 
     def on_channel_open(self, channel):
 
         self.declare_dead_letters(channel)
+
+    def check_method_call(self, connection):
+
+        try:
+            method = self.method_calls.get_nowait()
+            method()
+        except queue.Empty:
+            pass
+        connection.add_timeout(
+            0.01,
+            partial(self.check_method_call, connection),
+        )
 
     def send(self, amqp_channel, channel, message):
 
@@ -350,7 +373,19 @@ class ConnectionThread(threading.Thread):
     Separate heartbeat frames processing from actual work.
     """
 
-    pass
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+
+        self.args = url, expiry, group_expiry, capacity, channel_capacity
+        super(ConnectionThread, self).__init__(args=self.args)
+        self.daemon = True
+        self.calls = queue.Queue()
+
+    def run(self,):
+
+        url, expiry, group_expiry, capacity, channel_capacity = self.args
+        amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
+                    self.calls)
+        amqp.run()
 
 
 # TODO: is it optimal to read bytes from content frame, call python
