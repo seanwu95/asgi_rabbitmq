@@ -259,25 +259,22 @@ class AMQP(object):
     def on_connection_open(self, connection):
 
         connection.channel(self.on_channel_open)
-        connection.add_timeout(
-            0.01,
-            partial(self.check_method_call, connection),
-        )
 
-    def on_channel_open(self, channel):
+    def on_channel_open(self, amqp_channel):
 
-        self.declare_dead_letters(channel)
+        self.declare_dead_letters(amqp_channel)
+        self.check_method_call(amqp_channel)
 
-    def check_method_call(self, connection):
+    def check_method_call(self, amqp_channel):
 
         try:
             method = self.method_calls.get_nowait()
-            method()
+            method(amqp_channel=amqp_channel)
         except queue.Empty:
             pass
-        connection.add_timeout(
+        amqp_channel.connection.add_timeout(
             0.01,
-            partial(self.check_method_call, connection),
+            partial(self.check_method_call, amqp_channel),
         )
 
     def send(self, amqp_channel, channel, message):
@@ -375,17 +372,39 @@ class ConnectionThread(threading.Thread):
 
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
 
-        self.args = url, expiry, group_expiry, capacity, channel_capacity
-        super(ConnectionThread, self).__init__(args=self.args)
+        super(ConnectionThread, self).__init__()
         self.daemon = True
         self.calls = queue.Queue()
+        self.amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
+                         self.calls)
 
-    def run(self,):
+    def run(self):
 
-        url, expiry, group_expiry, capacity, channel_capacity = self.args
-        amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
-                    self.calls)
-        amqp.run()
+        self.amqp.run()
+
+
+class Layer(object):
+
+    def __init__(self,
+                 url,
+                 expiry=60,
+                 group_expiry=86400,
+                 capacity=100,
+                 channel_capacity=None):
+
+        self.thread = ConnectionThread(url, expiry, group_expiry, capacity,
+                                       channel_capacity)
+        self.thread.start()
+
+    def send(self, channel, message):
+
+        # FIXME: Handle queue.Full exception here.
+        self.thread.calls.put(
+            partial(
+                self.thread.amqp.send,
+                channel=channel,
+                message=message,
+            ))
 
 
 # TODO: is it optimal to read bytes from content frame, call python
