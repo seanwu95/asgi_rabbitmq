@@ -1,6 +1,7 @@
 import random
 import string
 import threading
+from collections import defaultdict
 from functools import partial
 
 import msgpack
@@ -303,6 +304,23 @@ class AMQP(object):
 
         declare_queue(callback)
 
+    def receive(self, amqp_channel, channels, block, result):
+
+        consumer_tags = {}
+
+        # FIXME: Don't define function each time.
+        def callback(amqp_channel, method_frame, properties, body):
+            amqp_channel.basic_ack(method_frame.delivery_tag)
+            for tag in consumer_tags:
+                amqp_channel.basic_cancel(consumer_tag=tag)
+            channel = consumer_tags[method_frame.consumer_tag]
+            message = self.deserialize(body)
+            result.put((channel, message))
+
+        for channel in channels:
+            tag = amqp_channel.basic_consume(callback, queue=channel)
+            consumer_tags[tag] = channel
+
     def declare_dead_letters(self, amqp_channel):
 
         declare_exchange = partial(
@@ -375,6 +393,7 @@ class ConnectionThread(threading.Thread):
         super(ConnectionThread, self).__init__()
         self.daemon = True
         self.calls = queue.Queue()
+        self.results = defaultdict(queue.Queue)
         self.amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
                          self.calls)
 
@@ -405,6 +424,18 @@ class Layer(object):
                 channel=channel,
                 message=message,
             ))
+
+    def receive(self, channels, block=False):
+
+        result = self.thread.results[threading.get_ident()]
+        self.thread.calls.put(
+            partial(
+                self.thread.amqp.receive,
+                channels=channels,
+                block=block,
+                result=result,
+            ))
+        return result.get()
 
 
 # TODO: is it optimal to read bytes from content frame, call python
