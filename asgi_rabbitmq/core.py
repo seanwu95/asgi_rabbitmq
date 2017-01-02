@@ -91,8 +91,18 @@ class AMQP(object):
 
         consumer_tags = {}
 
+        def timeout_callback():
+            for tag in consumer_tags:
+                amqp_channel.basic_cancel(consumer_tag=tag)
+            result.put(lambda: (None, None))
+
+        # FIXME: Set as less as possible, should be configurable.
+        # FIXME: Support `block is True` variant.
+        timeout_id = amqp_channel.connection.add_timeout(0.1, timeout_callback)
+
         # FIXME: Don't define function each time.
         def callback(amqp_channel, method_frame, properties, body):
+            amqp_channel.connection.remove_timeout(timeout_id)
             amqp_channel.basic_ack(method_frame.delivery_tag)
             for tag in consumer_tags:
                 amqp_channel.basic_cancel(consumer_tag=tag)
@@ -100,19 +110,9 @@ class AMQP(object):
             message = self.deserialize(body)
             result.put(lambda: (channel, message))
 
-        def timeout_callback():
-            for tag in consumer_tags:
-                amqp_channel.basic_cancel(consumer_tag=tag)
-            result.put(lambda: (None, None))
-
         for channel in channels:
             tag = amqp_channel.basic_consume(callback, queue=channel)
             consumer_tags[tag] = channel
-
-        # FIXME: Cancel `timeout_callback` on successful consume.
-        # FIXME: Set as less as possible, should be configurable.
-        # FIXME: Support `block is True` variant.
-        amqp_channel.connection.add_timeout(0.1, timeout_callback)
 
     def group_add(self, amqp_channel, group, channel, result):
 
