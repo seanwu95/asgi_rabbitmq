@@ -402,7 +402,9 @@ class ConnectionThread(threading.Thread):
         self.amqp.run()
 
 
-class Layer(object):
+class RabbitmqChannelLayer(object):
+
+    extensions = ['groups']
 
     def __init__(self,
                  url,
