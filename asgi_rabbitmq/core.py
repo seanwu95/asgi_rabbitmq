@@ -414,15 +414,9 @@ class ConnectionThread(threading.Thread):
         self.amqp.run()
 
 
-class RabbitmqChannelLayer(object):
+class RabbitmqChannelLayer(BaseChannelLayer):
 
     extensions = ['groups']
-
-    class ChannelFull(Exception):
-        pass
-
-    class MessageTooLarge(Exception):
-        pass
 
     def __init__(self,
                  url,
@@ -431,6 +425,12 @@ class RabbitmqChannelLayer(object):
                  capacity=100,
                  channel_capacity=None):
 
+        super(RabbitmqChannelLayer, self).__init__(
+            expiry=expiry,
+            group_expiry=group_expiry,
+            capacity=capacity,
+            channel_capacity=channel_capacity,
+        )
         self.thread = ConnectionThread(url, expiry, group_expiry, capacity,
                                        channel_capacity)
         self.thread.start()
