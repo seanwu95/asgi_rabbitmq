@@ -152,13 +152,5 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         super(RabbitmqChannelLayerTest, self).test_new_channel_single_process()
 
     @pytest.mark.xfail
-    def test_flush(self):
-        super(RabbitmqChannelLayerTest, self).test_flush()
-
-    @pytest.mark.xfail
-    def test_flush_groups(self):
-        super(RabbitmqChannelLayerTest, self).test_flush_groups()
-
-    @pytest.mark.xfail
     def test_group_expiry(self):
         super(RabbitmqChannelLayerTest, self).test_group_expiry()
