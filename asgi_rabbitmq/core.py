@@ -319,9 +319,19 @@ class AMQP(object):
             message = self.deserialize(body)
             result.put(lambda: (channel, message))
 
+        def timeout_callback():
+            for tag in consumer_tags:
+                amqp_channel.basic_cancel(consumer_tag=tag)
+            result.put(lambda: (None, None))
+
         for channel in channels:
             tag = amqp_channel.basic_consume(callback, queue=channel)
             consumer_tags[tag] = channel
+
+        # FIXME: Cancel `timeout_callback` on successful consume.
+        # FIXME: Set as less as possible, should be configurable.
+        # FIXME: Support `block is True` variant.
+        amqp_channel.connection.add_timeout(0.1, timeout_callback)
 
     def declare_dead_letters(self, amqp_channel):
 

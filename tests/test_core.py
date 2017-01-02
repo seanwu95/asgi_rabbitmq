@@ -144,10 +144,6 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     # FIXME: not so much working right now:
 
     @pytest.mark.xfail
-    def test_message_expiry(self):
-        super(RabbitmqChannelLayerTest, self).test_message_expiry()
-
-    @pytest.mark.xfail
     def test_new_channel_single_reader(self):
         super(RabbitmqChannelLayerTest, self).test_new_channel_single_reader()
 
