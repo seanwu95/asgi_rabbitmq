@@ -465,7 +465,9 @@ class AMQP(object):
         queue = properties.headers['x-death'][0]['queue']
         if is_expire_marker(queue):
             message = self.deserialize(body)
-            self.group_discard(amqp_channel, **message)
+            group = message['group']
+            channel = message['channel']
+            self.group_discard(amqp_channel, group, channel, skip_result)
         else:
             amqp_channel.exchange_delete(exchange=queue)
 
@@ -593,6 +595,24 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         raise cls.ChannelFull
 
+
+class NullQueue(object):
+    """`queue.Queue` stub."""
+
+    def get(self, block=True, timeout=None):
+        pass
+
+    def get_nowait(self):
+        pass
+
+    def put(self, item, block=True, timeout=None):
+        pass
+
+    def put_nowait(self, item):
+        pass
+
+
+skip_result = NullQueue()
 
 # TODO: is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with

@@ -150,7 +150,3 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     @pytest.mark.xfail
     def test_new_channel_single_process(self):
         super(RabbitmqChannelLayerTest, self).test_new_channel_single_process()
-
-    @pytest.mark.xfail
-    def test_group_expiry(self):
-        super(RabbitmqChannelLayerTest, self).test_group_expiry()
