@@ -230,11 +230,6 @@ class Result(object):
     __nonzero__ = __bool__
 
 
-def is_expire_marker(queue):
-
-    return queue.startswith('expire.bind.')
-
-
 class AMQP(object):
 
     dead_letters = 'dead-letters'
@@ -463,7 +458,7 @@ class AMQP(object):
         # FIXME: Ignore max-length dead-letters.
         # FIXME: what the hell zero means here?
         queue = properties.headers['x-death'][0]['queue']
-        if is_expire_marker(queue):
+        if self.is_expire_marker(queue):
             message = self.deserialize(body)
             group = message['group']
             channel = message['channel']
@@ -479,6 +474,10 @@ class AMQP(object):
     def deserialize(self, message):
 
         return msgpack.unpackb(message, encoding='utf8')
+
+    def is_expire_marker(self, queue):
+
+        return queue.startswith('expire.bind.')
 
 
 class ConnectionThread(threading.Thread):
