@@ -140,13 +140,5 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     #
     # Maybe first message succeeds to expire so message count don't
     # cross capacity border.
-
-    # FIXME: not so much working right now:
-
-    @pytest.mark.xfail
-    def test_new_channel_single_reader(self):
-        super(RabbitmqChannelLayerTest, self).test_new_channel_single_reader()
-
-    @pytest.mark.xfail
-    def test_new_channel_single_process(self):
-        super(RabbitmqChannelLayerTest, self).test_new_channel_single_process()
+    #
+    # FIXME: test `new_channel` against existing queue.

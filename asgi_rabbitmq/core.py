@@ -1,3 +1,5 @@
+import random
+import string
 import threading
 from collections import defaultdict
 from functools import partial
@@ -329,6 +331,18 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 result=self.result_queue,
             ))
         return self.result
+
+    def new_channel(self, pattern):
+
+        assert pattern.endswith('!') or pattern.endswith('?')
+
+        while True:
+            chars = (random.choice(string.ascii_letters) for _ in range(12))
+            random_string = ''.join(chars)
+            channel = pattern + random_string
+            # FIXME: We should return new channel only after 404 reply
+            # from queue_declare method.
+            return channel
 
     def group_add(self, group, channel):
 
