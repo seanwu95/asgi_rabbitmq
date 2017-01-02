@@ -184,10 +184,6 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         super(RabbitmqChannelLayerTest, self).test_capacity()
 
     @pytest.mark.xfail
-    def test_exceptions(self):
-        super(RabbitmqChannelLayerTest, self).test_exceptions()
-
-    @pytest.mark.xfail
     def test_message_alteration_after_send(self):
         super(RabbitmqChannelLayerTest,
               self).test_message_alteration_after_send()

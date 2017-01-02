@@ -406,6 +406,12 @@ class RabbitmqChannelLayer(object):
 
     extensions = ['groups']
 
+    class ChannelFull(Exception):
+        pass
+
+    class MessageTooLarge(Exception):
+        pass
+
     def __init__(self,
                  url,
                  expiry=60,
