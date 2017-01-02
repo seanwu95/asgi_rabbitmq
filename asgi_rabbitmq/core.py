@@ -532,9 +532,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 message=message,
                 result=self.result_queue,
             ))
-        result_getter = self.result_queue.get()
-        result = result_getter()
-        return result
+        return self.result
 
     def receive(self, channels, block=False):
 
@@ -545,9 +543,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 block=block,
                 result=self.result_queue,
             ))
-        result_getter = self.result_queue.get()
-        result = result_getter()
-        return result
+        return self.result
 
     def group_add(self, group, channel):
 
@@ -558,9 +554,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 channel=channel,
                 result=self.result_queue,
             ))
-        result_getter = self.result_queue.get()
-        result = result_getter()
-        return result
+        return self.result
 
     def group_discard(self, group, channel):
 
@@ -571,9 +565,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 channel=channel,
                 result=self.result_queue,
             ))
-        result_getter = self.result_queue.get()
-        result = result_getter()
-        return result
+        return self.result
 
     def send_group(self, group, message):
 
@@ -588,6 +580,13 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def result_queue(self):
 
         return self.thread.results[threading.get_ident()]
+
+    @property
+    def result(self):
+
+        result_getter = self.result_queue.get()
+        result = result_getter()
+        return result
 
     @classmethod
     def raise_channel_full(cls):
