@@ -278,9 +278,10 @@ class AMQP(object):
             partial(self.check_method_call, amqp_channel),
         )
 
-    def send(self, amqp_channel, channel, message):
+    def send(self, amqp_channel, channel, message, result):
 
-        # FIXME: Avoid constant queue declaration.
+        # FIXME: Avoid constant queue declaration.  Or at least try to
+        # minimize its impact to system.
         declare_queue = partial(
             amqp_channel.queue_declare,
             queue=channel,
@@ -290,8 +291,8 @@ class AMQP(object):
         # FIXME: remove nested function definition.
         def callback(method_frame):
             if method_frame.method.message_count >= self.capacity:
-                # FIXME: raise this exception in the calling thread
-                raise self.ChannelFull
+                result.put(RabbitmqChannelLayer.raise_channel_full)
+                return
             body = self.serialize(message)
             expiration = str(self.expiry * 1000)
             properties = BasicProperties(expiration=expiration)
@@ -301,6 +302,7 @@ class AMQP(object):
                 body=body,
                 properties=properties,
             )
+            result.put(lambda: None)
 
         declare_queue(callback)
 
@@ -315,7 +317,7 @@ class AMQP(object):
                 amqp_channel.basic_cancel(consumer_tag=tag)
             channel = consumer_tags[method_frame.consumer_tag]
             message = self.deserialize(body)
-            result.put((channel, message))
+            result.put(lambda: (channel, message))
 
         for channel in channels:
             tag = amqp_channel.basic_consume(callback, queue=channel)
@@ -423,27 +425,43 @@ class RabbitmqChannelLayer(object):
                                        channel_capacity)
         self.thread.start()
 
+    # FIXME: Handle queue.Full exception in all method calls blow.
+
     def send(self, channel, message):
 
-        # FIXME: Handle queue.Full exception here.
         self.thread.calls.put(
             partial(
                 self.thread.amqp.send,
                 channel=channel,
                 message=message,
+                result=self.result_queue,
             ))
+        result_getter = self.result_queue.get()
+        result = result_getter()
+        return result
 
     def receive(self, channels, block=False):
 
-        result = self.thread.results[threading.get_ident()]
         self.thread.calls.put(
             partial(
                 self.thread.amqp.receive,
                 channels=channels,
                 block=block,
-                result=result,
+                result=self.result_queue,
             ))
-        return result.get()
+        result_getter = self.result_queue.get()
+        result = result_getter()
+        return result
+
+    @property
+    def result_queue(self):
+
+        return self.thread.results[threading.get_ident()]
+
+    @classmethod
+    def raise_channel_full(cls):
+
+        raise cls.ChannelFull
 
 
 # TODO: is it optimal to read bytes from content frame, call python
