@@ -333,6 +333,95 @@ class AMQP(object):
         # FIXME: Support `block is True` variant.
         amqp_channel.connection.add_timeout(0.1, timeout_callback)
 
+    def group_add(self, amqp_channel, group, channel, result):
+
+        # FIXME: Is it possible to do this things in parallel?
+        self.expire_group_member(amqp_channel, group, channel)
+        declare_group = partial(
+            amqp_channel.exchange_declare,
+            exchange=group,
+            exchange_type='fanout',
+        )
+        declare_member = partial(
+            amqp_channel.exchange_declare,
+            exchange=channel,
+            exchange_type='fanout',
+        )
+        declare_channel = partial(
+            amqp_channel.queue_declare,
+            queue=channel,
+            arguments={'x-dead-letter-exchange': self.dead_letters},
+        )
+        bind_group = partial(
+            amqp_channel.exchange_bind,
+            destination=channel,
+            source=group,
+        )
+        bind_channel = partial(
+            amqp_channel.queue_bind,
+            queue=channel,
+            exchange=channel,
+        )
+        declare_group(
+            lambda method_frame: declare_member(
+                lambda method_frame: declare_channel(
+                    lambda method_frame: bind_group(
+                        lambda method_frame: bind_channel(
+                            lambda method_frame: result.put(lambda: None),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    def group_discard(self, amqp_channel, group, channel, result):
+
+        unbind_member = partial(
+            amqp_channel.exchange_unbind,
+            destination=channel,
+            source=group,
+        )
+        unbind_member(lambda method_frame: result.put(lambda: None))
+
+    def send_group(self, amqp_channel, group, message):
+
+        # FIXME: What about expiration property here?
+        body = self.serialize(message)
+        amqp_channel.basic_publish(
+            exchange=group,
+            routing_key='',
+            body=body,
+        )
+
+    def expire_group_member(self, amqp_channel, group, channel):
+
+        expire_marker = 'expire.bind.%s.%s' % (group, channel)
+        ttl = self.group_expiry * 1000
+
+        declare_marker = partial(
+            amqp_channel.queue_declare,
+            queue=expire_marker,
+            arguments={
+                'x-dead-letter-exchange': self.dead_letters,
+                'x-message-ttl': ttl,
+                # FIXME: make this delay as little as possible.
+                'x-expires': ttl + 500,
+                'x-max-length': 1,
+            })
+
+        def push_marker(method_frame):
+            body = self.serialize({
+                'group': group,
+                'channel': channel,
+            })
+            amqp_channel.basic_publish(
+                exchange='',
+                routing_key=expire_marker,
+                body=body,
+            )
+
+        declare_marker(push_marker)
+
     def declare_dead_letters(self, amqp_channel):
 
         declare_exchange = partial(
@@ -371,6 +460,7 @@ class AMQP(object):
     def on_dead_letter(self, amqp_channel, method_frame, properties, body):
 
         amqp_channel.basic_ack(method_frame.delivery_tag)
+        # FIXME: Ignore max-length dead-letters.
         # FIXME: what the hell zero means here?
         queue = properties.headers['x-death'][0]['queue']
         if is_expire_marker(queue):
@@ -378,10 +468,6 @@ class AMQP(object):
             self.group_discard(amqp_channel, **message)
         else:
             amqp_channel.exchange_delete(exchange=queue)
-
-    def group_discard(self, amqp_channel, group, channel):
-
-        amqp_channel.exchange_delete(exchange=channel)
 
     def serialize(self, message):
 
@@ -462,6 +548,41 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         result_getter = self.result_queue.get()
         result = result_getter()
         return result
+
+    def group_add(self, group, channel):
+
+        self.thread.calls.put(
+            partial(
+                self.thread.amqp.group_add,
+                group=group,
+                channel=channel,
+                result=self.result_queue,
+            ))
+        result_getter = self.result_queue.get()
+        result = result_getter()
+        return result
+
+    def group_discard(self, group, channel):
+
+        self.thread.calls.put(
+            partial(
+                self.thread.amqp.group_discard,
+                group=group,
+                channel=channel,
+                result=self.result_queue,
+            ))
+        result_getter = self.result_queue.get()
+        result = result_getter()
+        return result
+
+    def send_group(self, group, message):
+
+        self.thread.calls.put(
+            partial(
+                self.thread.amqp.send_group,
+                group=group,
+                message=message,
+            ))
 
     @property
     def result_queue(self):
