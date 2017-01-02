@@ -152,14 +152,6 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         super(RabbitmqChannelLayerTest, self).test_new_channel_single_process()
 
     @pytest.mark.xfail
-    def test_new_channel_failures(self):
-        super(RabbitmqChannelLayerTest, self).test_new_channel_failures()
-
-    @pytest.mark.xfail
-    def test_strings(self):
-        super(RabbitmqChannelLayerTest, self).test_strings()
-
-    @pytest.mark.xfail
     def test_groups(self):
         super(RabbitmqChannelLayerTest, self).test_groups()
 
@@ -174,8 +166,3 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     @pytest.mark.xfail
     def test_group_expiry(self):
         super(RabbitmqChannelLayerTest, self).test_group_expiry()
-
-    @pytest.mark.xfail
-    def test_message_alteration_after_send(self):
-        super(RabbitmqChannelLayerTest,
-              self).test_message_alteration_after_send()
