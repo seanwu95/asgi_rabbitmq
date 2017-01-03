@@ -124,6 +124,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
             'http.request',
             'websocket.receive',
             'websocket.connect',
+            'dead-letters',
         }
 
     def test_skip_another_layer_on_worker_ready(self):
@@ -144,7 +145,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         )
         worker = Worker(channel_layer=wrapper, signal_handlers=False)
         worker.ready()
-        assert not self.defined_queues
+        assert self.defined_queues == {'dead-letters'}
 
     # FIXME: test_capacity fails occasionally.
     #

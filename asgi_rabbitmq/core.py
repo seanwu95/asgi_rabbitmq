@@ -354,6 +354,20 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             # from queue_declare method.
             return channel
 
+    def declare_channel(self, channel):
+
+        # Put `result_queue` in the callback closure, since callback
+        # will be executed by another thread.  We will resolve another
+        # `result_queue` if we access it from `self` in the callback.
+        result_queue = self.result_queue
+        self.thread.calls.put(
+            partial(
+                self.thread.amqp.declare_channel,
+                channel=channel,
+                callback=lambda method_frame: result_queue.put(lambda: None),
+            ))
+        return self.result
+
     def group_add(self, group, channel):
 
         self.thread.calls.put(
@@ -435,11 +449,7 @@ def worker_start_hook(sender, **kwargs):
         return
     channels = sender.apply_channel_filters(layer_wrapper.router.channels)
     for channel in channels:
-        # FIXME: duplication, encapsulation violation.
-        layer.amqp_channel.queue_declare(
-            queue=channel,
-            arguments={'x-dead-letter-exchange': layer.dead_letters},
-        )
+        layer.declare_channel(channel)
 
 
 # FIXME: This must be optional since we don't require channels package
