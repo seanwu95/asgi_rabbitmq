@@ -129,6 +129,7 @@ class AMQP(object):
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
+    @retry_if_closed  # FIXME: What a hell?!
     @propagate_error
     def publish_message(self, amqp_channel, channel, message, result,
                         method_frame):
