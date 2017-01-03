@@ -44,8 +44,14 @@ class AMQP(object):
 
     def on_channel_open(self, amqp_channel):
 
+        amqp_channel.add_on_close_callback(self.on_channel_close)
         self.declare_dead_letters(amqp_channel)
         self.check_method_call(amqp_channel)
+
+    def on_channel_close(self, amqp_channel, code, msg):
+
+        # FIXME: Check if error is recoverable.
+        amqp_channel.connection.channel(self.on_channel_open)
 
     def check_method_call(self, amqp_channel):
 
@@ -123,6 +129,19 @@ class AMQP(object):
         for channel in channels:
             tag = amqp_channel.basic_consume(callback, queue=channel)
             consumer_tags[tag] = channel
+
+    def channel_exists(self, amqp_channel, channel, result):
+
+        def onerror(channel, code, msg):
+            result.put(lambda: False)
+
+        def callback(method_frame):
+            amqp_channel.callbacks.remove(amqp_channel.channel_number,
+                                          '_on_channel_close', onerror)
+            result.put(lambda: True)
+
+        amqp_channel.add_on_close_callback(onerror)
+        amqp_channel.queue_declare(callback, queue=channel, passive=True)
 
     def group_add(self, amqp_channel, group, channel, result):
 
@@ -354,9 +373,14 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                      for _ in range(12))
             random_string = ''.join(chars)
             channel = pattern + random_string
-            # FIXME: We should return new channel only after 404 reply
-            # from queue_declare method.
-            return channel
+            self.thread.calls.put(
+                partial(
+                    self.thread.amqp.channel_exists,
+                    channel=channel,
+                    result=self.result_queue,
+                ))
+            if not self.result:
+                return channel
 
     def declare_channel(self, channel):
 

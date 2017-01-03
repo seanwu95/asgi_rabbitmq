@@ -163,9 +163,15 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
             'websocket.connect',
         })
 
+    def test_new_channel_collision(self):
+        """Test `new_channel` against existing queue."""
+
+        self.declare_queue('test.foo!yWAcqGFzYtEw')
+        self.channel_layer.random.seed(0)
+        name = self.channel_layer.new_channel('test.foo!')
+        assert name != 'test.foo!yWAcqGFzYtEw'
+
     # FIXME: test_capacity fails occasionally.
     #
     # Maybe first message succeeds to expire so message count don't
     # cross capacity border.
-    #
-    # FIXME: test `new_channel` against existing queue.
