@@ -45,6 +45,19 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         queues = queue_definitions[self.virtual_host]
         return queues
 
+    def declare_queue(self, name):
+        """Declare queue in current vhost."""
+
+        self.management.post_definitions({
+            'queues': [{
+                'name': name,
+                'vhost': self.virtual_host,
+                'durable': False,
+                'auto_delete': False,
+                'arguments': {},
+            }],
+        })
+
     expiry_delay = 1.1
     capacity_limit = 5
     heartbeat_interval = 15
