@@ -13,15 +13,25 @@ from channels.worker import Worker
 class RabbitmqChannelLayerTest(ConformanceTestCase):
 
     @pytest.fixture(autouse=True)
-    def init_conformance_test(self, vhost, management):
+    def setup_channel_layer(self, rabbitmq_url):
 
-        url = '%s?heartbeat_interval=%d' % (vhost, self.heartbeat_interval)
+        rabbitmq_url = '%s?heartbeat_interval=%d' % (rabbitmq_url,
+                                                     self.heartbeat_interval)
         self.channel_layer = RabbitmqChannelLayer(
-            url,
+            rabbitmq_url,
             expiry=1,
             group_expiry=2,
             capacity=self.capacity_limit,
         )
+
+    @pytest.fixture(autouse=True)
+    def setup_virtual_host(self, virtual_host):
+
+        self.virtual_host = virtual_host
+
+    @pytest.fixture(autouse=True)
+    def setup_management(self, management):
+
         self.management = management
 
     @property
@@ -32,7 +42,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         queue_definitions = defaultdict(set)
         for queue in definitions['queues']:
             queue_definitions[queue['vhost']].add(queue['name'])
-        queues = queue_definitions[self.channel_layer.parameters.virtual_host]
+        queues = queue_definitions[self.virtual_host]
         return queues
 
     expiry_delay = 1.1
