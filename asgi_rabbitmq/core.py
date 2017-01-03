@@ -1,8 +1,4 @@
 import string
-try:
-    from threading import Thread, get_ident
-except ImportError:
-    from threading import Thread, _get_ident as get_ident
 from collections import defaultdict
 from functools import partial
 from random import Random
@@ -12,6 +8,11 @@ from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
 from pika.spec import BasicProperties
+
+try:
+    from threading import Thread, get_ident
+except ImportError:
+    from threading import Thread, _get_ident as get_ident
 
 try:
     import queue
