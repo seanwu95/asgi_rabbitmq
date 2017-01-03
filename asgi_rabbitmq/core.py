@@ -278,7 +278,7 @@ class ConnectionThread(threading.Thread):
         super(ConnectionThread, self).__init__()
         self.daemon = True
         self.calls = queue.Queue()
-        self.results = defaultdict(queue.Queue)
+        self.results = defaultdict(partial(queue.Queue, maxsize=1))
         self.amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
                          self.calls)
 
