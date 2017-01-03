@@ -82,34 +82,49 @@ class AMQP(object):
 
         return method_wrapper
 
+    def propagate_error(method):
+
+        @wraps(method)
+        def method_wrapper(self, **kwargs):
+
+            try:
+                method(self, **kwargs)
+            except Exception as error:
+                kwargs['result'].put(partial(throw, error))
+
+        return method_wrapper
+
     @retry_if_closed
     def send(self, amqp_channel, channel, message, result):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
         # minimize its impact to system.
+
+        # Use keyword arguments because of `method_wrapper` signature.
         publish_message = partial(
             self.publish_message,
-            amqp_channel,
-            channel,
-            message,
-            result,
+            amqp_channel=amqp_channel,
+            channel=channel,
+            message=message,
+            result=result,
         )
         self.declare_channel(amqp_channel, channel, publish_message)
 
     def declare_channel(self, amqp_channel, channel, callback):
 
         amqp_channel.queue_declare(
-            callback,
+            # Wrap in lambda because of `method_wrapper` signature.
+            lambda method_frame: callback(method_frame=method_frame),
             queue=channel,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
+    @propagate_error
     def publish_message(self, amqp_channel, channel, message, result,
                         method_frame):
 
         if method_frame.method.message_count >= self.capacity:
-            result.put(RabbitmqChannelLayer.raise_channel_full)
-            return
+            raise RabbitmqChannelLayer.ChannelFull
         body = self.serialize(message)
         expiration = str(self.expiry * 1000)
         properties = BasicProperties(expiration=expiration)
@@ -122,6 +137,7 @@ class AMQP(object):
         result.put(lambda: None)
 
     @retry_if_closed
+    @propagate_error
     def receive(self, amqp_channel, channels, block, result):
 
         consumer_tags = {}
@@ -150,6 +166,7 @@ class AMQP(object):
             consumer_tags[tag] = channel
 
     @retry_if_closed
+    @propagate_error
     def channel_exists(self, amqp_channel, channel, result):
 
         def onerror(channel, code, msg):
@@ -164,6 +181,7 @@ class AMQP(object):
         amqp_channel.queue_declare(callback, queue=channel, passive=True)
 
     @retry_if_closed
+    @propagate_error
     def group_add(self, amqp_channel, group, channel, result):
 
         # FIXME: Is it possible to do this things in parallel?
@@ -206,6 +224,7 @@ class AMQP(object):
         )
 
     @retry_if_closed
+    @propagate_error
     def group_discard(self, amqp_channel, group, channel, result):
 
         unbind_member = partial(
@@ -325,6 +344,7 @@ class AMQP(object):
         return queue.startswith('expire.bind.')
 
     del retry_if_closed
+    del propagate_error
 
 
 class ConnectionThread(Thread):
@@ -471,11 +491,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         result = result_getter()
         return result
 
-    @classmethod
-    def raise_channel_full(cls):
-
-        raise cls.ChannelFull
-
 
 class NullQueue(object):
     """`queue.Queue` stub."""
@@ -495,9 +510,18 @@ class NullQueue(object):
 
 skip_result = NullQueue()
 
+
+def throw(error):
+
+    raise error
+
+
 # TODO: is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with
 # msgpack?  We should minimize useless work on message receive.
+#
+# FIXME: `retry_if_closed` and `propagate_error` not works with nested
+# callbacks.
 
 
 def worker_start_hook(sender, **kwargs):
