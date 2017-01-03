@@ -38,6 +38,8 @@ class AMQP(object):
         self.channel_capacity = channel_capacity
         self.method_calls = method_calls
 
+    # Connection handling.
+
     def run(self):
 
         self.connection.ioloop.start()
@@ -69,6 +71,8 @@ class AMQP(object):
             partial(self.check_method_call, amqp_channel),
         )
 
+    # Utility decorators.
+
     def retry_if_closed(method):
 
         @wraps(method)
@@ -94,7 +98,8 @@ class AMQP(object):
 
         return method_wrapper
 
-    @retry_if_closed
+    # Send.
+
     def send(self, amqp_channel, channel, message, result):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
@@ -108,8 +113,13 @@ class AMQP(object):
             message=message,
             result=result,
         )
-        self.declare_channel(amqp_channel, channel, publish_message)
+        self.declare_channel(
+            amqp_channel=amqp_channel,
+            channel=channel,
+            callback=publish_message,
+        )
 
+    @retry_if_closed
     def declare_channel(self, amqp_channel, channel, callback):
 
         amqp_channel.queue_declare(
@@ -135,6 +145,8 @@ class AMQP(object):
             properties=properties,
         )
         result.put(lambda: None)
+
+    # Receive.
 
     @retry_if_closed
     @propagate_error
@@ -200,6 +212,8 @@ class AMQP(object):
         message = self.deserialize(body)
         result.put(lambda: (channel, message))
 
+    # New channel.
+
     @retry_if_closed
     @propagate_error
     def channel_exists(self, amqp_channel, channel, result):
@@ -214,6 +228,8 @@ class AMQP(object):
 
         amqp_channel.add_on_close_callback(onerror)
         amqp_channel.queue_declare(callback, queue=channel, passive=True)
+
+    # Groups.
 
     @retry_if_closed
     @propagate_error
@@ -279,6 +295,8 @@ class AMQP(object):
             routing_key='',
             body=body,
         )
+
+    # Dead letters processing.
 
     def expire_group_member(self, amqp_channel, group, channel):
 
@@ -365,6 +383,12 @@ class AMQP(object):
         else:
             amqp_channel.exchange_delete(exchange=queue)
 
+    def is_expire_marker(self, queue):
+
+        return queue.startswith('expire.bind.')
+
+    # Serialization.
+
     def serialize(self, message):
 
         value = msgpack.packb(message, use_bin_type=True)
@@ -373,10 +397,6 @@ class AMQP(object):
     def deserialize(self, message):
 
         return msgpack.unpackb(message, encoding='utf8')
-
-    def is_expire_marker(self, queue):
-
-        return queue.startswith('expire.bind.')
 
     del retry_if_closed
     del propagate_error
