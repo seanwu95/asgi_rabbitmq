@@ -63,29 +63,39 @@ class AMQP(object):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
         # minimize its impact to system.
-        declare_queue = partial(
-            amqp_channel.queue_declare,
+        publish_message = partial(
+            self.publish_message,
+            amqp_channel,
+            channel,
+            message,
+            result,
+        )
+        self.declare_channel(amqp_channel, channel, publish_message)
+
+    def declare_channel(self, amqp_channel, channel, callback):
+
+        amqp_channel.queue_declare(
+            callback,
             queue=channel,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
-        # FIXME: remove nested function definition.
-        def callback(method_frame):
-            if method_frame.method.message_count >= self.capacity:
-                result.put(RabbitmqChannelLayer.raise_channel_full)
-                return
-            body = self.serialize(message)
-            expiration = str(self.expiry * 1000)
-            properties = BasicProperties(expiration=expiration)
-            amqp_channel.basic_publish(
-                exchange='',
-                routing_key=channel,
-                body=body,
-                properties=properties,
-            )
-            result.put(lambda: None)
+    def publish_message(self, amqp_channel, channel, message, result,
+                        method_frame):
 
-        declare_queue(callback)
+        if method_frame.method.message_count >= self.capacity:
+            result.put(RabbitmqChannelLayer.raise_channel_full)
+            return
+        body = self.serialize(message)
+        expiration = str(self.expiry * 1000)
+        properties = BasicProperties(expiration=expiration)
+        amqp_channel.basic_publish(
+            exchange='',
+            routing_key=channel,
+            body=body,
+            properties=properties,
+        )
+        result.put(lambda: None)
 
     def receive(self, amqp_channel, channels, block, result):
 
