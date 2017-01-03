@@ -1,8 +1,8 @@
-import random
 import string
 import threading
 from collections import defaultdict
 from functools import partial
+from random import Random
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
@@ -301,6 +301,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     extensions = ['groups']
 
+    Random = Random
+
     def __init__(self,
                  url,
                  expiry=60,
@@ -317,6 +319,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         self.thread = ConnectionThread(url, expiry, group_expiry, capacity,
                                        channel_capacity)
         self.thread.start()
+        self.random = self.Random()
 
     # FIXME: Handle queue.Full exception in all method calls blow.
 
@@ -347,7 +350,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         assert pattern.endswith('!') or pattern.endswith('?')
 
         while True:
-            chars = (random.choice(string.ascii_letters) for _ in range(12))
+            chars = (self.random.choice(string.ascii_letters)
+                     for _ in range(12))
             random_string = ''.join(chars)
             channel = pattern + random_string
             # FIXME: We should return new channel only after 404 reply
