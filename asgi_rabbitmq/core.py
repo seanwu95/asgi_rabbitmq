@@ -1,6 +1,6 @@
 import string
 from collections import defaultdict
-from functools import partial
+from functools import partial, wraps
 from random import Random
 
 import msgpack
@@ -69,6 +69,20 @@ class AMQP(object):
             partial(self.check_method_call, amqp_channel),
         )
 
+    def retry_if_closed(method):
+
+        @wraps(method)
+        def method_wrapper(self, **kwargs):
+
+            amqp_channel = kwargs.pop('amqp_channel')
+            if amqp_channel.is_closed:
+                self.method_calls.put(partial(method_wrapper, self, **kwargs))
+            else:
+                method(self, amqp_channel=amqp_channel, **kwargs)
+
+        return method_wrapper
+
+    @retry_if_closed
     def send(self, amqp_channel, channel, message, result):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
@@ -107,6 +121,7 @@ class AMQP(object):
         )
         result.put(lambda: None)
 
+    @retry_if_closed
     def receive(self, amqp_channel, channels, block, result):
 
         consumer_tags = {}
@@ -134,6 +149,7 @@ class AMQP(object):
             tag = amqp_channel.basic_consume(callback, queue=channel)
             consumer_tags[tag] = channel
 
+    @retry_if_closed
     def channel_exists(self, amqp_channel, channel, result):
 
         def onerror(channel, code, msg):
@@ -147,6 +163,7 @@ class AMQP(object):
         amqp_channel.add_on_close_callback(onerror)
         amqp_channel.queue_declare(callback, queue=channel, passive=True)
 
+    @retry_if_closed
     def group_add(self, amqp_channel, group, channel, result):
 
         # FIXME: Is it possible to do this things in parallel?
@@ -188,6 +205,7 @@ class AMQP(object):
             ),
         )
 
+    @retry_if_closed
     def group_discard(self, amqp_channel, group, channel, result):
 
         unbind_member = partial(
@@ -197,6 +215,7 @@ class AMQP(object):
         )
         unbind_member(lambda method_frame: result.put(lambda: None))
 
+    @retry_if_closed
     def send_group(self, amqp_channel, group, message):
 
         # FIXME: What about expiration property here?
@@ -281,7 +300,14 @@ class AMQP(object):
             message = self.deserialize(body)
             group = message['group']
             channel = message['channel']
-            self.group_discard(amqp_channel, group, channel, skip_result)
+            # Use keyword arguments because of `method_wrapper`
+            # signature.
+            self.group_discard(
+                amqp_channel=amqp_channel,
+                group=group,
+                channel=channel,
+                result=skip_result,
+            )
         else:
             amqp_channel.exchange_delete(exchange=queue)
 
@@ -297,6 +323,8 @@ class AMQP(object):
     def is_expire_marker(self, queue):
 
         return queue.startswith('expire.bind.')
+
+    del retry_if_closed
 
 
 class ConnectionThread(Thread):
