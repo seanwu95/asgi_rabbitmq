@@ -74,6 +74,14 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         self.skip_if_no_extension('groups')
         self.channel_layer.group_discard('tgroup_2', 'tg_test3')
 
+    def test_receive_from_non_existed_channel(self):
+        """
+        If we tries to receive messages from channel which queue was not
+        declared already, things should works just fine.
+        """
+
+        self.channel_layer.receive(['foo'])
+
     def test_group_persistence_message_expiry(self):
         """
         Discard channel from all its groups when first message expires in

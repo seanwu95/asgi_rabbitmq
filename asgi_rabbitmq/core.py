@@ -141,29 +141,64 @@ class AMQP(object):
     def receive(self, amqp_channel, channels, block, result):
 
         consumer_tags = {}
-
-        def timeout_callback():
-            for tag in consumer_tags:
-                amqp_channel.basic_cancel(consumer_tag=tag)
-            result.put(lambda: (None, None))
-
+        timeout = partial(
+            self.consume_timeout,
+            amqp_channel=amqp_channel,
+            consumer_tags=consumer_tags,
+            result=result,
+        )
         # FIXME: Set as less as possible, should be configurable.
         # FIXME: Support `block is True` variant.
-        timeout_id = amqp_channel.connection.add_timeout(0.1, timeout_callback)
+        timeout_id = amqp_channel.connection.add_timeout(0.1, timeout)
+        callback = partial(
+            self.consume_message,
+            timeout_id=timeout_id,
+            consumer_tags=consumer_tags,
+            result=result,
+        )
+        for channel in channels:
+            tag = amqp_channel.basic_consume(
+                lambda amqp_channel,
+                method_frame,
+                properties,
+                body: callback(
+                    amqp_channel=amqp_channel,
+                    method_frame=method_frame,
+                    properties=properties,
+                    body=body,
+                ),
+                queue=channel,
+            )
+            consumer_tags[tag] = channel
 
-        # FIXME: Don't define function each time.
-        def callback(amqp_channel, method_frame, properties, body):
-            amqp_channel.connection.remove_timeout(timeout_id)
-            amqp_channel.basic_ack(method_frame.delivery_tag)
+    @propagate_error
+    def consume_timeout(self, amqp_channel, consumer_tags, result):
+        # If channel is closed here, it means we tried to consume from
+        # non existing queue.
+        if amqp_channel.is_open:
             for tag in consumer_tags:
                 amqp_channel.basic_cancel(consumer_tag=tag)
-            channel = consumer_tags[method_frame.consumer_tag]
-            message = self.deserialize(body)
-            result.put(lambda: (channel, message))
+        result.put(lambda: (None, None))
 
-        for channel in channels:
-            tag = amqp_channel.basic_consume(callback, queue=channel)
-            consumer_tags[tag] = channel
+    # FIXME: If we tries to consume from list of channels.  One of
+    # consumer queues doesn't exists.  Channel is closed with 404
+    # error. We will never consume from existing queues and will
+    # return empty response.
+    #
+    # FIXME: If we tries to consume from channel which queue doesn't
+    # exist at this time.  We consume with blocking == True.  We must
+    # start consuming at the moment when queue were declared.
+
+    @propagate_error
+    def consume_message(self, amqp_channel, method_frame, properties, body,
+                        timeout_id, consumer_tags, result):
+        amqp_channel.connection.remove_timeout(timeout_id)
+        amqp_channel.basic_ack(method_frame.delivery_tag)
+        for tag in consumer_tags:
+            amqp_channel.basic_cancel(consumer_tag=tag)
+        channel = consumer_tags[method_frame.consumer_tag]
+        message = self.deserialize(body)
+        result.put(lambda: (channel, message))
 
     @retry_if_closed
     @propagate_error
