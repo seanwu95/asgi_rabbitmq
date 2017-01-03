@@ -1,5 +1,8 @@
 import string
-import threading
+try:
+    from threading import Thread, get_ident
+except ImportError:
+    from threading import Thread, _get_ident as get_ident
 from collections import defaultdict
 from functools import partial
 from random import Random
@@ -295,7 +298,7 @@ class AMQP(object):
         return queue.startswith('expire.bind.')
 
 
-class ConnectionThread(threading.Thread):
+class ConnectionThread(Thread):
     """
     Thread holding connection.
 
@@ -430,7 +433,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     @property
     def result_queue(self):
 
-        return self.thread.results[threading.get_ident()]
+        return self.thread.results[get_ident()]
 
     @property
     def result(self):
