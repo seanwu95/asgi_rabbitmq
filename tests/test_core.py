@@ -120,12 +120,11 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         )
         worker = Worker(channel_layer=wrapper, signal_handlers=False)
         worker.ready()
-        assert self.defined_queues == {
+        assert self.defined_queues.issuperset({
             'http.request',
             'websocket.receive',
             'websocket.connect',
-            'dead-letters',
-        }
+        })
 
     def test_skip_another_layer_on_worker_ready(self):
         """
@@ -145,7 +144,11 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         )
         worker = Worker(channel_layer=wrapper, signal_handlers=False)
         worker.ready()
-        assert self.defined_queues == {'dead-letters'}
+        assert self.defined_queues.isdisjoint({
+            'http.request',
+            'websocket.receive',
+            'websocket.connect',
+        })
 
     # FIXME: test_capacity fails occasionally.
     #
