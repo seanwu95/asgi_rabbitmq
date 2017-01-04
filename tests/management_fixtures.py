@@ -33,7 +33,7 @@ def management(environment):
     return AdminAPI('http://%s:%s' % (hostname, port), (user, password))
 
 
-@pytest.yield_fixture(scope='session', autouse=True)
+@pytest.fixture(scope='session')
 def remove_vhost(management):
     """
     Remove all virtual hosts in the RabbitMQ which was created during
