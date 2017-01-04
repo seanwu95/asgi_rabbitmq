@@ -1,22 +1,32 @@
 import multiprocessing
+import time
 
+import django
 import pytest
-from channels import DEFAULT_CHANNEL_LAYER, channel_layers
+from asgi_rabbitmq import RabbitmqChannelLayer
+from channels.asgi import ChannelLayerWrapper
 from channels.worker import Worker
 from daphne.server import Server
 
-from demo.asgi import channel_layer
 
-
-@pytest.fixture(scope='session')
-def asgi_server():
+@pytest.fixture
+def asgi_server(rabbitmq_url):
     """Daphne Live Server."""
 
-    worker_process = WorkerProcess()
+    worker_process = WorkerProcess(url=rabbitmq_url)
     worker_process.start()
-    server_process = DaphneProcess()
+    server_process = DaphneProcess(url=rabbitmq_url)
     server_process.start()
-    return server_process.host, server_process.port
+    if server_process.host != '0.0.0.0':
+        host = server_process.host
+    else:
+        host = '127.0.0.1'
+    time.sleep(2)
+    yield host, server_process.port
+    server_process.terminate()
+    server_process.join()
+    worker_process.terminate()
+    worker_process.join()
 
 
 class DaphneProcess(multiprocessing.Process):
@@ -26,11 +36,19 @@ class DaphneProcess(multiprocessing.Process):
 
     def __init__(self, *args, **kwargs):
 
+        self.url = kwargs.pop('url')
         super(DaphneProcess, self).__init__(*args, **kwargs)
         self.daemon = True
 
     def run(self):
 
+        django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
+        asgi_layer = RabbitmqChannelLayer(url=self.url)
+        channel_layer = ChannelLayerWrapper(
+            channel_layer=asgi_layer,
+            alias='default',
+            routing='demo.routing.routes',
+        )
         server = Server(
             channel_layer=channel_layer,
             host=self.host,
@@ -44,13 +62,21 @@ class WorkerProcess(multiprocessing.Process):
 
     def __init__(self, *args, **kwargs):
 
+        self.url = kwargs.pop('url')
         super(WorkerProcess, self).__init__(*args, **kwargs)
         self.daemon = True
 
     def run(self):
 
+        asgi_layer = RabbitmqChannelLayer(url=self.url)
+        channel_layer = ChannelLayerWrapper(
+            channel_layer=asgi_layer,
+            alias='default',
+            routing='demo.routing.routes',
+        )
+        channel_layer.router.check_default()
         worker = Worker(
-            channel_layer=channel_layers[DEFAULT_CHANNEL_LAYER],
+            channel_layer=channel_layer,
             signal_handlers=False,
         )
         worker.ready()

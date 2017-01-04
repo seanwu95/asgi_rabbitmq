@@ -55,13 +55,13 @@ DATABASES = {
 }
 
 CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'asgi_ipc.IPCChannelLayer',
-        'ROUTING': 'demo.routing.routes',
-        'CONFIG': {
-            'prefix': 'demo',
-        },
-    },
+    # 'default': {
+    #     'BACKEND': 'asgi_rabbitmq.RabbitmqChannelLayer',
+    #     'ROUTING': 'demo.routing.routes',
+    #     'CONFIG': {
+    #         'url': 'amqp://guest:guest@rabbitmq:5672/%2F',
+    #     },
+    # },
 }
 
 LANGUAGE_CODE = 'en-us'
