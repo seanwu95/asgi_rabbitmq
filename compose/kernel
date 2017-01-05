@@ -1,0 +1,5 @@
+FROM python:3.5
+RUN pip install jupyter_kernel_gateway
+RUN mkdir /code
+WORKDIR /code
+CMD jupyter kernelgateway --KernelGatewayApp.ip=0.0.0.0 --KernelGatewayApp.port=8889

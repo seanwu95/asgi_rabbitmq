@@ -46,3 +46,16 @@ services:
       TOXENV: py35-django18,py35-django19,py35-django110
     ports:
       - "8002:8000"
+  kernel:
+    build:
+      context: .
+      dockerfile: compose/kernel
+    volumes:
+      - .:/code
+    depends_on:
+      - rabbitmq
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      PYTHONPATH: /code/.tox3.5.2/py35-django110/lib/python3.5/site-packages
+    ports:
+      - "8889:8889"
