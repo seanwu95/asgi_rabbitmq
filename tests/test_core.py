@@ -179,6 +179,13 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         name = self.channel_layer.new_channel('test.foo!')
         assert name != 'test.foo!yWAcqGFzYtEw'
 
+    @pytest.mark.xfail
+    def test_new_channel_declare_queue(self):
+        """`new_channel` must declare queue if its name is available."""
+
+        name = self.channel_layer.new_channel('test.foo!')
+        assert name in self.defined_queues
+
     # FIXME: test_capacity fails occasionally.
     #
     # Maybe first message succeeds to expire so message count don't
