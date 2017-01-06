@@ -104,6 +104,10 @@ class AMQP(object):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
         # minimize its impact to system.
+        #
+        # FIXME: If this operation results in error, on_channel_close
+        # callback will be called (which is empty in this case).  So
+        # calling thread will hang on result wait.
 
         # Use keyword arguments because of `method_wrapper` signature.
         publish_message = partial(
@@ -126,6 +130,7 @@ class AMQP(object):
             # Wrap in lambda because of `method_wrapper` signature.
             lambda method_frame: callback(method_frame=method_frame),
             queue=channel,
+            passive=True if '!' in channel or '?' in channel else False,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
@@ -217,18 +222,18 @@ class AMQP(object):
 
     @retry_if_closed
     @propagate_error
-    def channel_exists(self, amqp_channel, channel, result):
+    def new_channel(self, amqp_channel, channel, result):
 
         def onerror(channel, code, msg):
-            result.put(lambda: False)
+            result.put(lambda: throw(Exception(code, msg)))
 
         def callback(method_frame):
             amqp_channel.callbacks.remove(amqp_channel.channel_number,
                                           '_on_channel_close', onerror)
-            result.put(lambda: True)
+            result.put(lambda: channel)
 
         amqp_channel.add_on_close_callback(onerror)
-        amqp_channel.queue_declare(callback, queue=channel, passive=True)
+        amqp_channel.queue_declare(callback, queue=channel, exclusive=True)
 
     # Groups.
 
@@ -483,12 +488,14 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             channel = pattern + random_string
             self.thread.calls.put(
                 partial(
-                    self.thread.amqp.channel_exists,
+                    self.thread.amqp.new_channel,
                     channel=channel,
                     result=self.result_queue,
                 ))
-            if not self.result:
-                return channel
+            try:
+                return self.result
+            except Exception:
+                pass
 
     def declare_channel(self, channel):
 

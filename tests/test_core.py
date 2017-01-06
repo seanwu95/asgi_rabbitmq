@@ -8,6 +8,8 @@ from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
 from channels.worker import Worker
+from pika import BlockingConnection, URLParameters
+from pika.exceptions import ChannelClosed
 
 
 class RabbitmqChannelLayerTest(ConformanceTestCase):
@@ -15,10 +17,10 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     @pytest.fixture(autouse=True)
     def setup_channel_layer(self, rabbitmq_url):
 
-        rabbitmq_url = '%s?heartbeat_interval=%d' % (rabbitmq_url,
-                                                     self.heartbeat_interval)
+        self.rabbitmq_url = '%s?heartbeat_interval=%d' % (
+            rabbitmq_url, self.heartbeat_interval)
         self.channel_layer = RabbitmqChannelLayer(
-            rabbitmq_url,
+            self.rabbitmq_url,
             expiry=1,
             group_expiry=2,
             capacity=self.capacity_limit,
@@ -45,18 +47,29 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         queues = queue_definitions[self.virtual_host]
         return queues
 
-    def declare_queue(self, name):
+    def declare_queue(self,
+                      queue='',
+                      passive=False,
+                      durable=False,
+                      exclusive=False,
+                      auto_delete=False,
+                      arguments=None):
         """Declare queue in current vhost."""
 
-        self.management.post_definitions({
-            'queues': [{
-                'name': name,
-                'vhost': self.virtual_host,
-                'durable': False,
-                'auto_delete': False,
-                'arguments': {},
-            }],
-        })
+        connection = BlockingConnection(URLParameters(self.rabbitmq_url))
+        channel = connection.channel()
+        try:
+            method_frame = channel.queue_declare(
+                queue=queue,
+                passive=passive,
+                durable=durable,
+                exclusive=exclusive,
+                auto_delete=auto_delete,
+                arguments=arguments,
+            )
+        finally:
+            connection.close()
+        return method_frame
 
     expiry_delay = 1.1
     capacity_limit = 5
@@ -179,12 +192,24 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         name = self.channel_layer.new_channel('test.foo!')
         assert name != 'test.foo!yWAcqGFzYtEw'
 
-    @pytest.mark.xfail
     def test_new_channel_declare_queue(self):
         """`new_channel` must declare queue if its name is available."""
 
         name = self.channel_layer.new_channel('test.foo!')
-        assert name in self.defined_queues
+        # We can check the presence of exclusive queue only by failure
+        # of its creation.
+        with pytest.raises(ChannelClosed) as exc_info:
+            self.declare_queue(name)
+        assert exc_info.value.args[0] == 405
+
+    def test_new_channel_capacity(self):
+        """Channel created with `new_channel` must support capacity check."""
+
+        name = self.channel_layer.new_channel('test.foo!')
+        for _ in range(self.capacity_limit):
+            self.channel_layer.send(name, {'hey': 'there'})
+        with self.assertRaises(self.channel_layer.ChannelFull):
+            self.channel_layer.send(name, {'hey': 'there'})
 
     # FIXME: test_capacity fails occasionally.
     #
