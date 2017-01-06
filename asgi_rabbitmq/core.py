@@ -37,6 +37,7 @@ class AMQP(object):
         self.capacity = capacity
         self.channel_capacity = channel_capacity
         self.method_calls = method_calls
+        self.declared_channels = set()
 
     # Connection handling.
 
@@ -224,10 +225,15 @@ class AMQP(object):
     @propagate_error
     def new_channel(self, amqp_channel, channel, result):
 
+        if channel in self.declared_channels:
+            result.put(lambda: throw(Exception))
+            return
+
         def onerror(channel, code, msg):
             result.put(lambda: throw(Exception(code, msg)))
 
         def callback(method_frame):
+            self.declared_channels.add(channel)
             amqp_channel.callbacks.remove(amqp_channel.channel_number,
                                           '_on_channel_close', onerror)
             result.put(lambda: channel)

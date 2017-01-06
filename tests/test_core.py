@@ -192,6 +192,18 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         name = self.channel_layer.new_channel('test.foo!')
         assert name != 'test.foo!yWAcqGFzYtEw'
 
+    def test_new_channel_collision_in_the_same_connection(self):
+        """
+        Test `new_channel` against existing queue created by the same
+        connection earlier.
+        """
+
+        self.channel_layer.random.seed(0)
+        self.channel_layer.new_channel('test.foo!')
+        self.channel_layer.random.seed(0)
+        name = self.channel_layer.new_channel('test.foo!')
+        assert name != 'test.foo!yWAcqGFzYtEw'
+
     def test_new_channel_declare_queue(self):
         """`new_channel` must declare queue if its name is available."""
 
