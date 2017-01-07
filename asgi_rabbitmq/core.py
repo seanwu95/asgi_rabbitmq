@@ -81,19 +81,6 @@ class AMQP(object):
         else:
             return channel
 
-    def retry_if_closed(method):
-
-        @wraps(method)
-        def method_wrapper(self, **kwargs):
-
-            amqp_channel = kwargs.pop('amqp_channel')
-            if amqp_channel.is_closed:
-                self.method_calls.put(partial(method_wrapper, self, **kwargs))
-            else:
-                method(self, amqp_channel=amqp_channel, **kwargs)
-
-        return method_wrapper
-
     def propagate_error(method):
 
         @wraps(method)
@@ -153,7 +140,6 @@ class AMQP(object):
             callback=publish_message,
         )
 
-    @retry_if_closed
     def declare_channel(self, amqp_channel, channel, callback):
 
         amqp_channel.queue_declare(
@@ -162,7 +148,6 @@ class AMQP(object):
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
-    @retry_if_closed  # FIXME: What a hell?!
     @propagate_error
     def publish_message(self, amqp_channel, channel, message, resolve,
                         method_frame):
@@ -182,7 +167,6 @@ class AMQP(object):
 
     # Receive.
 
-    @retry_if_closed
     @propagate_error
     @propagate_on_close
     def receive(self, amqp_channel, channels, block, resolve):
@@ -249,7 +233,6 @@ class AMQP(object):
 
     # New channel.
 
-    @retry_if_closed
     @propagate_error
     @propagate_on_close
     def new_channel(self, amqp_channel, resolve):
@@ -260,7 +243,6 @@ class AMQP(object):
 
     # Groups.
 
-    @retry_if_closed
     @propagate_error
     @propagate_on_close
     def group_add(self, amqp_channel, group, channel, resolve):
@@ -304,7 +286,6 @@ class AMQP(object):
             ),
         )
 
-    @retry_if_closed
     @propagate_error
     @propagate_on_close
     def group_discard(self, amqp_channel, group, channel, resolve):
@@ -316,7 +297,6 @@ class AMQP(object):
         )
         unbind_member(lambda method_frame: resolve(lambda: None))
 
-    @retry_if_closed
     def send_group(self, amqp_channel, group, message):
 
         # FIXME: What about expiration property here?
@@ -427,7 +407,6 @@ class AMQP(object):
 
         return msgpack.unpackb(message, encoding='utf8')
 
-    del retry_if_closed
     del propagate_error
     del propagate_on_close
 
