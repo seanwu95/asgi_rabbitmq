@@ -8,8 +8,6 @@ from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
 from channels.worker import Worker
-from pika import BlockingConnection, URLParameters
-from pika.exceptions import ChannelClosed
 
 
 class RabbitmqChannelLayerTest(ConformanceTestCase):
@@ -47,29 +45,18 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         queues = queue_definitions[self.virtual_host]
         return queues
 
-    def declare_queue(self,
-                      queue='',
-                      passive=False,
-                      durable=False,
-                      exclusive=False,
-                      auto_delete=False,
-                      arguments=None):
+    def declare_queue(self, name):
         """Declare queue in current vhost."""
 
-        connection = BlockingConnection(URLParameters(self.rabbitmq_url))
-        channel = connection.channel()
-        try:
-            method_frame = channel.queue_declare(
-                queue=queue,
-                passive=passive,
-                durable=durable,
-                exclusive=exclusive,
-                auto_delete=auto_delete,
-                arguments=arguments,
-            )
-        finally:
-            connection.close()
-        return method_frame
+        self.management.post_definitions({
+            'queues': [{
+                'name': name,
+                'vhost': self.virtual_host,
+                'durable': False,
+                'auto_delete': False,
+                'arguments': {},
+            }],
+        })
 
     expiry_delay = 1.1
     capacity_limit = 5
