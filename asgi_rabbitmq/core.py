@@ -102,13 +102,13 @@ class AMQP(object):
             try:
                 method(self, **kwargs)
             except Exception as error:
-                kwargs['result'].put(partial(throw, error))
+                kwargs['resolve'](partial(throw, error))
 
         return method_wrapper
 
     # Send.
 
-    def send(self, amqp_channel, channel, message, result):
+    def send(self, amqp_channel, channel, message, resolve):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
         # minimize its impact to system.
@@ -123,7 +123,7 @@ class AMQP(object):
             amqp_channel=amqp_channel,
             channel=queue,
             message=message,
-            result=result,
+            resolve=resolve,
         )
         self.declare_channel(
             amqp_channel=amqp_channel,
@@ -135,7 +135,6 @@ class AMQP(object):
     def declare_channel(self, amqp_channel, channel, callback):
 
         amqp_channel.queue_declare(
-            # Wrap in lambda because of `method_wrapper` signature.
             lambda method_frame: callback(method_frame=method_frame),
             queue=channel,
             arguments={'x-dead-letter-exchange': self.dead_letters},
@@ -143,7 +142,7 @@ class AMQP(object):
 
     @retry_if_closed  # FIXME: What a hell?!
     @propagate_error
-    def publish_message(self, amqp_channel, channel, message, result,
+    def publish_message(self, amqp_channel, channel, message, resolve,
                         method_frame):
 
         if method_frame.method.message_count >= self.capacity:
@@ -157,20 +156,20 @@ class AMQP(object):
             body=body,
             properties=properties,
         )
-        result.put(lambda: None)
+        resolve(lambda: None)
 
     # Receive.
 
     @retry_if_closed
     @propagate_error
-    def receive(self, amqp_channel, channels, block, result):
+    def receive(self, amqp_channel, channels, block, resolve):
 
         consumer_tags = {}
         timeout = partial(
             self.consume_timeout,
             amqp_channel=amqp_channel,
             consumer_tags=consumer_tags,
-            result=result,
+            resolve=resolve,
         )
         # FIXME: Set as less as possible, should be configurable.
         # FIXME: Support `block is True` variant.
@@ -179,7 +178,7 @@ class AMQP(object):
             self.consume_message,
             timeout_id=timeout_id,
             consumer_tags=consumer_tags,
-            result=result,
+            resolve=resolve,
         )
         for channel in channels:
             tag = amqp_channel.basic_consume(
@@ -197,13 +196,13 @@ class AMQP(object):
             consumer_tags[tag] = channel
 
     @propagate_error
-    def consume_timeout(self, amqp_channel, consumer_tags, result):
+    def consume_timeout(self, amqp_channel, consumer_tags, resolve):
         # If channel is closed here, it means we tried to consume from
         # non existing queue.
         if amqp_channel.is_open:
             for tag in consumer_tags:
                 amqp_channel.basic_cancel(consumer_tag=tag)
-        result.put(lambda: (None, None))
+        resolve(lambda: (None, None))
 
     # FIXME: If we tries to consume from list of channels.  One of
     # consumer queues doesn't exists.  Channel is closed with 404
@@ -216,30 +215,30 @@ class AMQP(object):
 
     @propagate_error
     def consume_message(self, amqp_channel, method_frame, properties, body,
-                        timeout_id, consumer_tags, result):
+                        timeout_id, consumer_tags, resolve):
         amqp_channel.connection.remove_timeout(timeout_id)
         amqp_channel.basic_ack(method_frame.delivery_tag)
         for tag in consumer_tags:
             amqp_channel.basic_cancel(consumer_tag=tag)
         channel = consumer_tags[method_frame.consumer_tag]
         message = self.deserialize(body)
-        result.put(lambda: (channel, message))
+        resolve(lambda: (channel, message))
 
     # New channel.
 
     @retry_if_closed
     @propagate_error
-    def new_channel(self, amqp_channel, result):
+    def new_channel(self, amqp_channel, resolve):
 
         amqp_channel.queue_declare(
-            lambda method_frame: result.put(lambda: method_frame.method.queue),
+            lambda method_frame: resolve(lambda: method_frame.method.queue),
         )
 
     # Groups.
 
     @retry_if_closed
     @propagate_error
-    def group_add(self, amqp_channel, group, channel, result):
+    def group_add(self, amqp_channel, group, channel, resolve):
 
         # FIXME: Is it possible to do this things in parallel?
         self.expire_group_member(amqp_channel, group, channel)
@@ -273,7 +272,7 @@ class AMQP(object):
                 lambda method_frame: declare_channel(
                     lambda method_frame: bind_group(
                         lambda method_frame: bind_channel(
-                            lambda method_frame: result.put(lambda: None),
+                            lambda method_frame: resolve(lambda: None),
                         ),
                     ),
                 ),
@@ -282,14 +281,14 @@ class AMQP(object):
 
     @retry_if_closed
     @propagate_error
-    def group_discard(self, amqp_channel, group, channel, result):
+    def group_discard(self, amqp_channel, group, channel, resolve):
 
         unbind_member = partial(
             amqp_channel.exchange_unbind,
             destination=channel,
             source=group,
         )
-        unbind_member(lambda method_frame: result.put(lambda: None))
+        unbind_member(lambda method_frame: resolve(lambda: None))
 
     @retry_if_closed
     def send_group(self, amqp_channel, group, message):
@@ -378,13 +377,11 @@ class AMQP(object):
             message = self.deserialize(body)
             group = message['group']
             channel = message['channel']
-            # Use keyword arguments because of `method_wrapper`
-            # signature.
             self.group_discard(
                 amqp_channel=amqp_channel,
                 group=group,
                 channel=channel,
-                result=skip_result,
+                resolve=lambda item: None,
             )
         else:
             amqp_channel.exchange_delete(exchange=queue)
@@ -459,7 +456,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.send,
                 channel=channel,
                 message=message,
-                result=self.result_queue,
+                resolve=self.resolve,
             ))
         return self.result
 
@@ -470,7 +467,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.receive,
                 channels=channels,
                 block=block,
-                result=self.result_queue,
+                resolve=self.resolve,
             ))
         return self.result
 
@@ -480,7 +477,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         self.thread.calls.put(
             partial(
                 self.thread.amqp.new_channel,
-                result=self.result_queue,
+                resolve=self.resolve,
             ))
         queue_name = self.result
         channel = pattern + queue_name
@@ -507,7 +504,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.group_add,
                 group=group,
                 channel=channel,
-                result=self.result_queue,
+                resolve=self.resolve,
             ))
         return self.result
 
@@ -518,7 +515,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.group_discard,
                 group=group,
                 channel=channel,
-                result=self.result_queue,
+                resolve=self.resolve,
             ))
         return self.result
 
@@ -543,24 +540,10 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         result = result_getter()
         return result
 
+    @property
+    def resolve(self):
 
-class NullQueue(object):
-    """`queue.Queue` stub."""
-
-    def get(self, block=True, timeout=None):
-        pass
-
-    def get_nowait(self):
-        pass
-
-    def put(self, item, block=True, timeout=None):
-        pass
-
-    def put_nowait(self, item):
-        pass
-
-
-skip_result = NullQueue()
+        return self.result_queue.put
 
 
 def throw(error):
