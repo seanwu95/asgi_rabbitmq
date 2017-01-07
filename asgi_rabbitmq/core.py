@@ -106,17 +106,39 @@ class AMQP(object):
 
         return method_wrapper
 
+    def propagate_on_close(method):
+
+        @wraps(method)
+        def method_wrapper(self, **kwargs):
+
+            amqp_channel = kwargs['amqp_channel']
+            resolve = kwargs.pop('resolve')
+
+            def onerror(channel, code, msg):
+                resolve(lambda: throw(Exception(code, msg)))
+
+            amqp_channel.add_on_close_callback(onerror)
+
+            def cancel_and_resolve(item):
+                # FIXME: checking promise.is_live should be simpler.
+                amqp_channel.callbacks.remove(
+                    amqp_channel.channel_number,
+                    '_on_channel_close',
+                    onerror,
+                )
+                resolve(item)
+
+            method(self, resolve=cancel_and_resolve, **kwargs)
+
+        return method_wrapper
+
     # Send.
 
+    @propagate_on_close
     def send(self, amqp_channel, channel, message, resolve):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
         # minimize its impact to system.
-        #
-        # FIXME: If this operation results in error, on_channel_close
-        # callback will be called (which is empty in this case).  So
-        # calling thread will hang on result wait.
-
         queue = self.get_queue_name(channel)
         publish_message = partial(
             self.publish_message,
@@ -162,6 +184,7 @@ class AMQP(object):
 
     @retry_if_closed
     @propagate_error
+    @propagate_on_close
     def receive(self, amqp_channel, channels, block, resolve):
 
         consumer_tags = {}
@@ -228,6 +251,7 @@ class AMQP(object):
 
     @retry_if_closed
     @propagate_error
+    @propagate_on_close
     def new_channel(self, amqp_channel, resolve):
 
         amqp_channel.queue_declare(
@@ -238,6 +262,7 @@ class AMQP(object):
 
     @retry_if_closed
     @propagate_error
+    @propagate_on_close
     def group_add(self, amqp_channel, group, channel, resolve):
 
         # FIXME: Is it possible to do this things in parallel?
@@ -281,6 +306,7 @@ class AMQP(object):
 
     @retry_if_closed
     @propagate_error
+    @propagate_on_close
     def group_discard(self, amqp_channel, group, channel, resolve):
 
         unbind_member = partial(
@@ -403,6 +429,7 @@ class AMQP(object):
 
     del retry_if_closed
     del propagate_error
+    del propagate_on_close
 
 
 class ConnectionThread(Thread):
