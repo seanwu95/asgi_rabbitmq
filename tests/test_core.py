@@ -188,6 +188,24 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         with self.assertRaises(self.channel_layer.ChannelFull):
             self.channel_layer.send(name, {'hey': 'there'})
 
+    def test_add_reply_channel_to_group(self):
+        """
+        Reply channel is the most popular candidate for group membership.
+        Check we can do it.
+        """
+
+        name = self.channel_layer.new_channel('test.foo!')
+        self.channel_layer.group_add('test.group', name)
+        self.channel_layer.send_group('test.group', {'foo': 'bar'})
+        channel, message = self.channel_layer.receive([name])
+        assert channel == name
+        assert message == {'foo': 'bar'}
+        self.channel_layer.group_discard('test.group', name)
+        self.channel_layer.send_group('test.group', {'foo': 'bar'})
+        channel, message = self.channel_layer.receive([name])
+        assert channel is None
+        assert message is None
+
     # FIXME: test_capacity fails occasionally.
     #
     # Maybe first message succeeds to expire so message count don't

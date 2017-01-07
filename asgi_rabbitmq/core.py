@@ -141,14 +141,16 @@ class AMQP(object):
         self.declare_channel(
             amqp_channel=amqp_channel,
             channel=queue,
+            passive=True if '!' in channel or '?' in channel else False,
             callback=publish_message,
         )
 
-    def declare_channel(self, amqp_channel, channel, callback):
+    def declare_channel(self, amqp_channel, channel, passive, callback):
 
         amqp_channel.queue_declare(
             lambda method_frame: callback(method_frame=method_frame),
             queue=channel,
+            passive=passive,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
@@ -263,11 +265,14 @@ class AMQP(object):
             exchange=channel,
             exchange_type='fanout',
         )
-        declare_channel = partial(
-            amqp_channel.queue_declare,
-            queue=channel,
-            arguments={'x-dead-letter-exchange': self.dead_letters},
-        )
+        if '!' in channel or '?' in channel:
+            declare_channel = lambda callback: callback(method_frame=None)
+        else:
+            declare_channel = partial(
+                amqp_channel.queue_declare,
+                queue=channel,
+                arguments={'x-dead-letter-exchange': self.dead_letters},
+            )
         bind_group = partial(
             amqp_channel.exchange_bind,
             destination=channel,
@@ -275,7 +280,7 @@ class AMQP(object):
         )
         bind_channel = partial(
             amqp_channel.queue_bind,
-            queue=channel,
+            queue=self.get_queue_name(channel),
             exchange=channel,
         )
         declare_group(
@@ -315,7 +320,8 @@ class AMQP(object):
 
     def expire_group_member(self, amqp_channel, group, channel):
 
-        expire_marker = 'expire.bind.%s.%s' % (group, channel)
+        expire_marker = 'expire.bind.%s.%s' % (group,
+                                               self.get_queue_name(channel))
         ttl = self.group_expiry * 1000
 
         declare_marker = partial(
@@ -506,6 +512,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             partial(
                 self.thread.amqp.declare_channel,
                 channel=channel,
+                passive=False,
                 callback=lambda method_frame: result_queue.put(lambda: None),
             ))
         return self.result
