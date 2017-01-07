@@ -171,35 +171,12 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
             'websocket.connect',
         })
 
-    def test_new_channel_collision(self):
-        """Test `new_channel` against existing queue."""
-
-        self.declare_queue('test.foo!yWAcqGFzYtEw')
-        self.channel_layer.random.seed(0)
-        name = self.channel_layer.new_channel('test.foo!')
-        assert name != 'test.foo!yWAcqGFzYtEw'
-
-    def test_new_channel_collision_in_the_same_connection(self):
-        """
-        Test `new_channel` against existing queue created by the same
-        connection earlier.
-        """
-
-        self.channel_layer.random.seed(0)
-        self.channel_layer.new_channel('test.foo!')
-        self.channel_layer.random.seed(0)
-        name = self.channel_layer.new_channel('test.foo!')
-        assert name != 'test.foo!yWAcqGFzYtEw'
-
     def test_new_channel_declare_queue(self):
         """`new_channel` must declare queue if its name is available."""
 
         name = self.channel_layer.new_channel('test.foo!')
-        # We can check the presence of exclusive queue only by failure
-        # of its creation.
-        with pytest.raises(ChannelClosed) as exc_info:
-            self.declare_queue(name)
-        assert exc_info.value.args[0] == 405
+        queue = name.rsplit('!', 1)[-1]
+        assert queue in self.defined_queues
 
     def test_new_channel_capacity(self):
         """Channel created with `new_channel` must support capacity check."""

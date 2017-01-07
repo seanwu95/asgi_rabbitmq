@@ -1,7 +1,5 @@
-import string
 from collections import defaultdict
 from functools import partial, wraps
-from random import Random
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
@@ -72,7 +70,16 @@ class AMQP(object):
             partial(self.check_method_call, amqp_channel),
         )
 
-    # Utility decorators.
+    # Utilities.
+
+    def get_queue_name(self, channel):
+
+        if '!' in channel:
+            return channel.rsplit('!', 1)[-1]
+        elif '?' in channel:
+            return channel.rsplit('?', 1)[-1]
+        else:
+            return channel
 
     def retry_if_closed(method):
 
@@ -110,17 +117,17 @@ class AMQP(object):
         # callback will be called (which is empty in this case).  So
         # calling thread will hang on result wait.
 
-        # Use keyword arguments because of `method_wrapper` signature.
+        queue = self.get_queue_name(channel)
         publish_message = partial(
             self.publish_message,
             amqp_channel=amqp_channel,
-            channel=channel,
+            channel=queue,
             message=message,
             result=result,
         )
         self.declare_channel(
             amqp_channel=amqp_channel,
-            channel=channel,
+            channel=queue,
             callback=publish_message,
         )
 
@@ -131,7 +138,6 @@ class AMQP(object):
             # Wrap in lambda because of `method_wrapper` signature.
             lambda method_frame: callback(method_frame=method_frame),
             queue=channel,
-            passive=True if '!' in channel or '?' in channel else False,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
@@ -186,7 +192,7 @@ class AMQP(object):
                     properties=properties,
                     body=body,
                 ),
-                queue=channel,
+                queue=self.get_queue_name(channel),
             )
             consumer_tags[tag] = channel
 
@@ -223,23 +229,11 @@ class AMQP(object):
 
     @retry_if_closed
     @propagate_error
-    def new_channel(self, amqp_channel, channel, result):
+    def new_channel(self, amqp_channel, result):
 
-        if channel in self.declared_channels:
-            result.put(lambda: throw(Exception))
-            return
-
-        def onerror(channel, code, msg):
-            result.put(lambda: throw(Exception(code, msg)))
-
-        def callback(method_frame):
-            self.declared_channels.add(channel)
-            amqp_channel.callbacks.remove(amqp_channel.channel_number,
-                                          '_on_channel_close', onerror)
-            result.put(lambda: channel)
-
-        amqp_channel.add_on_close_callback(onerror)
-        amqp_channel.queue_declare(callback, queue=channel, exclusive=True)
+        amqp_channel.queue_declare(
+            lambda method_frame: result.put(lambda: method_frame.method.queue),
+        )
 
     # Groups.
 
@@ -439,8 +433,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     extensions = ['groups']
 
-    Random = Random
-
     def __init__(self,
                  url,
                  expiry=60,
@@ -457,7 +449,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         self.thread = ConnectionThread(url, expiry, group_expiry, capacity,
                                        channel_capacity)
         self.thread.start()
-        self.random = self.Random()
 
     # FIXME: Handle queue.Full exception in all method calls blow.
 
@@ -486,22 +477,14 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
-
-        while True:
-            chars = (self.random.choice(string.ascii_letters)
-                     for _ in range(12))
-            random_string = ''.join(chars)
-            channel = pattern + random_string
-            self.thread.calls.put(
-                partial(
-                    self.thread.amqp.new_channel,
-                    channel=channel,
-                    result=self.result_queue,
-                ))
-            try:
-                return self.result
-            except Exception:
-                pass
+        self.thread.calls.put(
+            partial(
+                self.thread.amqp.new_channel,
+                result=self.result_queue,
+            ))
+        queue_name = self.result
+        channel = pattern + queue_name
+        return channel
 
     def declare_channel(self, channel):
 
