@@ -18,6 +18,10 @@ except ImportError:
     import Queue as queue
 
 
+class PropagatedError(Exception):
+    """Exception raised to show error from the connection thread."""
+
+
 class AMQP(object):
 
     dead_letters = 'dead-letters'
@@ -102,7 +106,7 @@ class AMQP(object):
             resolve = kwargs.pop('resolve')
 
             def onerror(channel, code, msg):
-                resolve(lambda: throw(Exception(code, msg)))
+                resolve(lambda: throw(PropagatedError(code, msg)))
 
             amqp_channel.add_on_close_callback(onerror)
 
@@ -475,7 +479,10 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 block=block,
                 resolve=self.resolve,
             ))
-        return self.result
+        try:
+            return self.result
+        except PropagatedError:
+            return None, None
 
     def new_channel(self, pattern):
 

@@ -80,7 +80,8 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         declared already, things should works just fine.
         """
 
-        self.channel_layer.receive(['foo'])
+        channel, message = self.channel_layer.receive(['foo'])
+        assert (channel, message) == (None, None)
 
     def test_group_persistence_message_expiry(self):
         """
