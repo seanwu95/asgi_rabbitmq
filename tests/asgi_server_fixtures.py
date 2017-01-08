@@ -5,15 +5,15 @@ import django
 import pytest
 from asgi_rabbitmq import RabbitmqChannelLayer
 from channels.asgi import ChannelLayerWrapper
-from channels.worker import Worker
+from channels.worker import Worker, WorkerGroup
 from daphne.server import Server
 
 
-@pytest.fixture
-def asgi_server(rabbitmq_url):
+@pytest.fixture(params=[1, 4])
+def asgi_server(request, rabbitmq_url):
     """Daphne Live Server."""
 
-    worker_process = WorkerProcess(url=rabbitmq_url)
+    worker_process = WorkerProcess(url=rabbitmq_url, threads=request.param)
     worker_process.start()
     server_process = DaphneProcess(url=rabbitmq_url)
     server_process.start()
@@ -63,6 +63,7 @@ class WorkerProcess(multiprocessing.Process):
     def __init__(self, *args, **kwargs):
 
         self.url = kwargs.pop('url')
+        self.threads = kwargs.pop('threads')
         super(WorkerProcess, self).__init__(*args, **kwargs)
         self.daemon = True
 
@@ -75,9 +76,16 @@ class WorkerProcess(multiprocessing.Process):
             routing='demo.routing.routes',
         )
         channel_layer.router.check_default()
-        worker = Worker(
-            channel_layer=channel_layer,
-            signal_handlers=False,
-        )
+        if self.threads == 1:
+            worker = Worker(
+                channel_layer=channel_layer,
+                signal_handlers=False,
+            )
+        else:
+            worker = WorkerGroup(
+                channel_layer=channel_layer,
+                signal_handlers=False,
+                n_threads=self.threads,
+            )
         worker.ready()
         worker.run()
