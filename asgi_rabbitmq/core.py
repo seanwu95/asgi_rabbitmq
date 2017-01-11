@@ -39,7 +39,7 @@ class AMQP(object):
         self.capacity = capacity
         self.channel_capacity = channel_capacity
         self.method_calls = method_calls
-        self.declared_channels = set()
+        self.channels = {}
 
     # Connection handling.
 
@@ -50,29 +50,53 @@ class AMQP(object):
     def on_connection_open(self, connection):
 
         connection.channel(self.on_channel_open)
+        self.check_method_call()
 
     def on_channel_open(self, amqp_channel):
 
         amqp_channel.add_on_close_callback(self.on_channel_close)
         self.declare_dead_letters(amqp_channel)
-        self.check_method_call(amqp_channel)
 
     def on_channel_close(self, amqp_channel, code, msg):
 
         # FIXME: Check if error is recoverable.
         amqp_channel.connection.channel(self.on_channel_open)
 
-    def check_method_call(self, amqp_channel):
+    def check_method_call(self):
 
         try:
-            method = self.method_calls.get_nowait()
-            method(amqp_channel=amqp_channel)
+            ident, method = self.method_calls.get_nowait()
+            self.process(ident, method)
         except queue.Empty:
             pass
-        amqp_channel.connection.add_timeout(
-            0.01,
-            partial(self.check_method_call, amqp_channel),
+        self.connection.add_timeout(0.01, self.check_method_call)
+
+    def process(self, ident, method):
+
+        if ident in self.channels:
+            amqp_channel = self.channels[ident]
+            if amqp_channel.is_open:
+                method(amqp_channel=amqp_channel)
+                return
+        self.connection.channel(
+            partial(
+                self.register_channel,
+                ident=ident,
+                method=method,
+            ))
+
+    def register_channel(self, amqp_channel, ident, method=None):
+
+        amqp_channel.add_on_close_callback(
+            partial(self.discard_channel, ident),
         )
+        self.channels[ident] = amqp_channel
+        if method:
+            method(amqp_channel=amqp_channel)
+
+    def discard_channel(self, ident, amqp_channel, code, msg):
+
+        del self.channels[ident]
 
     # Utilities.
 
@@ -467,7 +491,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send(self, channel, message):
 
-        self.thread.calls.put(
+        self.schedule(
             partial(
                 self.thread.amqp.send,
                 channel=channel,
@@ -478,7 +502,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def receive(self, channels, block=False):
 
-        self.thread.calls.put(
+        self.schedule(
             partial(
                 self.thread.amqp.receive,
                 channels=channels,
@@ -493,7 +517,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
-        self.thread.calls.put(
+        self.schedule(
             partial(
                 self.thread.amqp.new_channel,
                 resolve=self.resolve,
@@ -508,7 +532,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         # will be executed by another thread.  We will resolve another
         # `result_queue` if we access it from `self` in the callback.
         result_queue = self.result_queue
-        self.thread.calls.put(
+        self.schedule(
             partial(
                 self.thread.amqp.declare_channel,
                 channel=channel,
@@ -519,7 +543,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_add(self, group, channel):
 
-        self.thread.calls.put(
+        self.schedule(
             partial(
                 self.thread.amqp.group_add,
                 group=group,
@@ -530,7 +554,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_discard(self, group, channel):
 
-        self.thread.calls.put(
+        self.schedule(
             partial(
                 self.thread.amqp.group_discard,
                 group=group,
@@ -541,7 +565,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send_group(self, group, message):
 
-        self.thread.calls.put(
+        self.schedule(
             partial(
                 self.thread.amqp.send_group,
                 group=group,
@@ -559,6 +583,10 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         result_getter = self.result_queue.get()
         result = result_getter()
         return result
+
+    def schedule(self, f):
+
+        self.thread.calls.put((get_ident(), f))
 
     @property
     def resolve(self):

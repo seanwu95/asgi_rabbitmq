@@ -1,3 +1,4 @@
+import threading
 import time
 from collections import defaultdict
 
@@ -206,7 +207,22 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         assert channel is None
         assert message is None
 
-    # FIXME: test_capacity fails occasionally.
-    #
-    # Maybe first message succeeds to expire so message count don't
-    # cross capacity border.
+    def test_access_to_the_layer_instance_from_different_threads(self):
+        """
+        Operations made by one thread shouldn't change connection state
+        made from another thread.
+        """
+
+        def receive_non_existed():
+            time.sleep(0.015)
+            self.channel_layer.receive(['bar'])
+
+        thread = threading.Thread(target=receive_non_existed)
+        thread.deamon = True
+        thread.start()
+
+        # If all things goes fine, this line will be executed
+        # successfully.
+        self.channel_layer.group_add('my_group', 'foo')
+
+    # FIXME: test_group_persistence_message_expiry fails occasionally.
