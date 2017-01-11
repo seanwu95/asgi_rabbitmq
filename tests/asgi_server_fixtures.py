@@ -51,8 +51,7 @@ class DaphneProcess(multiprocessing.Process):
         )
         server = Server(
             channel_layer=channel_layer,
-            host=self.host,
-            port=self.port,
+            endpoints=['tcp:port=%d:interface=%s' % (self.port, self.host)],
             signal_handlers=False,
         )
         server.run()
