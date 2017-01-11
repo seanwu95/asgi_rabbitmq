@@ -96,7 +96,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         self.channel_layer.group_add('tgme_group2', 'tgme_test')
         self.channel_layer.send('tgme_test', {'hello': 'world'})
         # Wait until message in the channel expires.
-        time.sleep(self.channel_layer.expiry)
+        time.sleep(self.channel_layer.expiry + 1)
         # Channel lost its membership in the group #1.
         self.channel_layer.send_group('tgme_group1', {'hello': 'world1'})
         channel, message = self.channel_layer.receive(['tgme_test'])
@@ -224,5 +224,3 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         # If all things goes fine, this line will be executed
         # successfully.
         self.channel_layer.group_add('my_group', 'foo')
-
-    # FIXME: test_group_persistence_message_expiry fails occasionally.
