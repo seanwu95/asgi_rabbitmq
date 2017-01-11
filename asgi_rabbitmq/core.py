@@ -87,16 +87,9 @@ class AMQP(object):
 
     def register_channel(self, amqp_channel, ident, method=None):
 
-        amqp_channel.add_on_close_callback(
-            partial(self.discard_channel, ident),
-        )
         self.channels[ident] = amqp_channel
         if method:
             method(amqp_channel=amqp_channel)
-
-    def discard_channel(self, ident, amqp_channel, code, msg):
-
-        del self.channels[ident]
 
     # Utilities.
 
