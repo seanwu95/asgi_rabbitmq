@@ -27,7 +27,7 @@ class AMQP(object):
     dead_letters = 'dead-letters'
 
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
-                 method_calls, method_results):
+                 method_calls):
 
         self.parameters = URLParameters(url)
         self.connection = SelectConnection(
@@ -39,7 +39,6 @@ class AMQP(object):
         self.capacity = capacity
         self.channel_capacity = channel_capacity
         self.method_calls = method_calls
-        self.method_results = method_results
         self.channels = {}
 
     # Connection handling.
@@ -77,10 +76,7 @@ class AMQP(object):
         if ident in self.channels:
             amqp_channel = self.channels[ident]
             if amqp_channel.is_open:
-                method(
-                    amqp_channel=amqp_channel,
-                    resolve=self.method_results[ident].put,
-                )
+                method(amqp_channel=amqp_channel)
                 return
         self.connection.channel(
             partial(
@@ -93,10 +89,7 @@ class AMQP(object):
 
         self.channels[ident] = amqp_channel
         if method:
-            method(
-                amqp_channel=amqp_channel,
-                resolve=self.method_results[ident].put,
-            )
+            method(amqp_channel=amqp_channel)
 
     # Utilities.
 
@@ -162,23 +155,14 @@ class AMQP(object):
             message=message,
             resolve=resolve,
         )
-        self.do_declare_channel(
+        self.declare_channel(
             amqp_channel=amqp_channel,
             channel=queue,
             passive=True if '!' in channel or '?' in channel else False,
             callback=publish_message,
         )
 
-    def declare_channel(self, amqp_channel, channel, passive, resolve):
-
-        self.do_declare_channel(
-            amqp_channel=amqp_channel,
-            channel=channel,
-            passive=passive,
-            callback=lambda method_frame: resolve(lambda: None),
-        )
-
-    def do_declare_channel(self, amqp_channel, channel, passive, callback):
+    def declare_channel(self, amqp_channel, channel, passive, callback):
 
         amqp_channel.queue_declare(
             lambda method_frame: callback(method_frame=method_frame),
@@ -339,7 +323,7 @@ class AMQP(object):
         )
         unbind_member(lambda method_frame: resolve(lambda: None))
 
-    def send_group(self, amqp_channel, group, message, resolve):
+    def send_group(self, amqp_channel, group, message):
 
         # FIXME: What about expiration property here?
         body = self.serialize(message)
@@ -468,7 +452,7 @@ class ConnectionThread(Thread):
         self.calls = queue.Queue()
         self.results = defaultdict(partial(queue.Queue, maxsize=1))
         self.amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
-                         self.calls, self.results)
+                         self.calls)
 
     def run(self):
 
@@ -505,6 +489,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.send,
                 channel=channel,
                 message=message,
+                resolve=self.resolve,
             ))
         return self.result
 
@@ -515,6 +500,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.receive,
                 channels=channels,
                 block=block,
+                resolve=self.resolve,
             ))
         try:
             return self.result
@@ -524,7 +510,11 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
-        self.schedule(self.thread.amqp.new_channel)
+        self.schedule(
+            partial(
+                self.thread.amqp.new_channel,
+                resolve=self.resolve,
+            ))
         queue_name = self.result
         channel = pattern + queue_name
         return channel
@@ -540,6 +530,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.declare_channel,
                 channel=channel,
                 passive=False,
+                callback=lambda method_frame: result_queue.put(lambda: None),
             ))
         return self.result
 
@@ -550,6 +541,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.group_add,
                 group=group,
                 channel=channel,
+                resolve=self.resolve,
             ))
         return self.result
 
@@ -560,6 +552,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 self.thread.amqp.group_discard,
                 group=group,
                 channel=channel,
+                resolve=self.resolve,
             ))
         return self.result
 
@@ -587,6 +580,11 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def schedule(self, f):
 
         self.thread.calls.put((get_ident(), f))
+
+    @property
+    def resolve(self):
+
+        return self.result_queue.put
 
 
 def throw(error):
