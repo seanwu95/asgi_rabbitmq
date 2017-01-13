@@ -1,9 +1,12 @@
 from setuptools import setup, find_packages
 
+readme = open('README.rst').read() + open('CHANGELOG.rst').read()
+
 setup(
     name='asgi_rabbitmq',
-    version='0.1.dev1',
+    version='0.1',
     description='RabbitMQ backend for ASGI',
+    long_description=readme,
     url='https://github.com/proofit404/asgi_rabbitmq',
     license='BSD',
     author='Django Software Foundation',
