@@ -15,7 +15,7 @@ cache:
   directories:
   - $HOME/.cache/pip/wheels
 install:
-  - pip install -U pip wheel
+  - pip install -U pip wheel setuptools
   - pip install -r requirements/qa.txt
   - pip install -r requirements/ci.txt
   - pip install "${DJANGO_VERSION}"
