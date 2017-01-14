@@ -1,4 +1,4 @@
-from collections import defaultdict
+from concurrent.futures import Future
 from functools import partial, wraps
 
 import msgpack
@@ -110,7 +110,7 @@ class AMQP(object):
             try:
                 method(self, **kwargs)
             except Exception as error:
-                kwargs['resolve'](partial(throw, error))
+                kwargs['resolve'].set_exception(error)
 
         return method_wrapper
 
@@ -120,23 +120,20 @@ class AMQP(object):
         def method_wrapper(self, **kwargs):
 
             amqp_channel = kwargs['amqp_channel']
-            resolve = kwargs.pop('resolve')
+            resolve = kwargs['resolve']
 
             def onerror(channel, code, msg):
-                resolve(lambda: throw(PropagatedError(code, msg)))
+                resolve.set_exception(PropagatedError(code, msg))
 
-            amqp_channel.add_on_close_callback(onerror)
-
-            def cancel_and_resolve(item):
-                # FIXME: checking promise.is_live should be simpler.
-                amqp_channel.callbacks.remove(
+            resolve.add_done_callback(
+                partial(
+                    amqp_channel.callbacks.remove,
                     amqp_channel.channel_number,
                     '_on_channel_close',
                     onerror,
-                )
-                resolve(item)
-
-            method(self, resolve=cancel_and_resolve, **kwargs)
+                ))
+            amqp_channel.add_on_close_callback(onerror)
+            method(self, **kwargs)
 
         return method_wrapper
 
@@ -186,7 +183,7 @@ class AMQP(object):
             body=body,
             properties=properties,
         )
-        resolve(lambda: None)
+        resolve.set_result(None)
 
     # Receive.
 
@@ -232,7 +229,7 @@ class AMQP(object):
         if amqp_channel.is_open:
             for tag in consumer_tags:
                 amqp_channel.basic_cancel(consumer_tag=tag)
-        resolve(lambda: (None, None))
+        resolve.set_result((None, None))
 
     # FIXME: If we tries to consume from list of channels.  One of
     # consumer queues doesn't exists.  Channel is closed with 404
@@ -252,7 +249,7 @@ class AMQP(object):
             amqp_channel.basic_cancel(consumer_tag=tag)
         channel = consumer_tags[method_frame.consumer_tag]
         message = self.deserialize(body)
-        resolve(lambda: (channel, message))
+        resolve.set_result((channel, message))
 
     # New channel.
 
@@ -261,7 +258,7 @@ class AMQP(object):
     def new_channel(self, amqp_channel, resolve):
 
         amqp_channel.queue_declare(
-            lambda method_frame: resolve(lambda: method_frame.method.queue),
+            lambda method_frame: resolve.set_result(method_frame.method.queue),
         )
 
     # Groups.
@@ -305,7 +302,7 @@ class AMQP(object):
                 lambda method_frame: declare_channel(
                     lambda method_frame: bind_group(
                         lambda method_frame: bind_channel(
-                            lambda method_frame: resolve(lambda: None),
+                            lambda method_frame: resolve.set_result(None),
                         ),
                     ),
                 ),
@@ -321,7 +318,7 @@ class AMQP(object):
             destination=channel,
             source=group,
         )
-        unbind_member(lambda method_frame: resolve(lambda: None))
+        unbind_member(lambda method_frame: resolve.set_result(None))
 
     def send_group(self, amqp_channel, group, message):
 
@@ -414,7 +411,7 @@ class AMQP(object):
                 amqp_channel=amqp_channel,
                 group=group,
                 channel=channel,
-                resolve=lambda item: None,
+                resolve=Future(),
             )
         else:
             amqp_channel.exchange_delete(exchange=queue)
@@ -450,7 +447,6 @@ class ConnectionThread(Thread):
         super(ConnectionThread, self).__init__()
         self.daemon = True
         self.calls = queue.Queue()
-        self.results = defaultdict(partial(queue.Queue, maxsize=1))
         self.amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
                          self.calls)
 
@@ -484,77 +480,78 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send(self, channel, message):
 
+        future = Future()
         self.schedule(
             partial(
                 self.thread.amqp.send,
                 channel=channel,
                 message=message,
-                resolve=self.resolve,
+                resolve=future,
             ))
-        return self.result
+        return future.result()
 
     def receive(self, channels, block=False):
 
+        future = Future()
         self.schedule(
             partial(
                 self.thread.amqp.receive,
                 channels=channels,
                 block=block,
-                resolve=self.resolve,
+                resolve=future,
             ))
         try:
-            return self.result
+            return future.result()
         except PropagatedError:
             return None, None
 
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
-        self.schedule(
-            partial(
-                self.thread.amqp.new_channel,
-                resolve=self.resolve,
-            ))
-        queue_name = self.result
+        future = Future()
+        self.schedule(partial(
+            self.thread.amqp.new_channel,
+            resolve=future,
+        ))
+        queue_name = future.result()
         channel = pattern + queue_name
         return channel
 
     def declare_channel(self, channel):
 
-        # Put `result_queue` in the callback closure, since callback
-        # will be executed by another thread.  We will resolve another
-        # `result_queue` if we access it from `self` in the callback.
-        result_queue = self.result_queue
+        future = Future()
         self.schedule(
             partial(
                 self.thread.amqp.declare_channel,
                 channel=channel,
                 passive=False,
-                callback=lambda method_frame: result_queue.put(lambda: None),
+                callback=lambda method_frame: future.set_result(None),
             ))
-        return self.result
+        return future.result()
 
     def group_add(self, group, channel):
 
+        future = Future()
         self.schedule(
             partial(
                 self.thread.amqp.group_add,
                 group=group,
                 channel=channel,
-                resolve=self.resolve,
+                resolve=future,
             ))
-        return self.result
+        return future.result()
 
     def group_discard(self, group, channel):
 
+        future = Future()
         self.schedule(
             partial(
                 self.thread.amqp.group_discard,
                 group=group,
                 channel=channel,
-                resolve=self.resolve,
+                resolve=future,
             ))
-        return self.result
+        return future.result()
 
     def send_group(self, group, message):
 
@@ -565,31 +562,9 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 message=message,
             ))
 
-    @property
-    def result_queue(self):
-
-        return self.thread.results[get_ident()]
-
-    @property
-    def result(self):
-
-        result_getter = self.result_queue.get()
-        result = result_getter()
-        return result
-
     def schedule(self, f):
 
         self.thread.calls.put((get_ident(), f))
-
-    @property
-    def resolve(self):
-
-        return self.result_queue.put
-
-
-def throw(error):
-
-    raise error
 
 
 # TODO: is it optimal to read bytes from content frame, call python
