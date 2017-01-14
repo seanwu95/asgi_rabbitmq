@@ -313,12 +313,11 @@ class AMQP(object):
     @propagate_on_close
     def group_discard(self, amqp_channel, group, channel, resolve):
 
-        unbind_member = partial(
-            amqp_channel.exchange_unbind,
+        amqp_channel.exchange_unbind(
+            lambda method_frame: resolve.set_result(None),
             destination=channel,
             source=group,
         )
-        unbind_member(lambda method_frame: resolve.set_result(None))
 
     def send_group(self, amqp_channel, group, message):
 
