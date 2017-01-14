@@ -1,4 +1,3 @@
-from concurrent.futures import Future
 from functools import partial, wraps
 
 import msgpack
@@ -6,6 +5,11 @@ from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
 from pika.spec import BasicProperties
+
+try:
+    from concurrent.futures import Future
+except ImportError:
+    from futures import Future
 
 try:
     from threading import Thread, get_ident

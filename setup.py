@@ -18,4 +18,5 @@ setup(
         'pika>=0.10.0',
         'asgiref>=1.0.0',
         'msgpack-python',
+        'futures ; python_version < "3.0"',
     ])
