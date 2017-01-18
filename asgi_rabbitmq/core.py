@@ -29,12 +29,14 @@ class PropagatedError(Exception):
 class AMQP(object):
 
     dead_letters = 'dead-letters'
+    Parameters = URLParameters
+    Connection = SelectConnection
 
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
                  method_calls):
 
-        self.parameters = URLParameters(url)
-        self.connection = SelectConnection(
+        self.parameters = self.Parameters(url)
+        self.connection = self.Connection(
             parameters=self.parameters,
             on_open_callback=self.on_connection_open,
         )
