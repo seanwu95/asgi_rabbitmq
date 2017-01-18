@@ -14,3 +14,8 @@ class DebugConnection(SelectConnection):
 
 class DebugChannel(Channel):
     """Collect statistics about RabbitMQ methods usage on channel."""
+
+
+# TODO: print statistics on connection close.
+#
+# TODO: collect statistics in connection and channel methods.
