@@ -31,6 +31,19 @@ def print_stats():
 atexit.register(print_stats)
 
 
+def wrap(method, callback):
+
+    start = time.time()
+
+    def wrapper(method_frame):
+        latency = time.time() - start
+        stats[method].append(latency)
+        if callback:
+            callback(method_frame)
+
+    return wrapper
+
+
 class DebugConnection(SelectConnection):
     """Collect statistics about RabbitMQ methods usage on connection."""
 
@@ -55,100 +68,25 @@ class DebugChannel(Channel):
     def basic_publish(self, *args, **kwargs):
         return super(DebugChannel, self).basic_publish(*args, **kwargs)
 
-    def exchange_bind(self,
-                      callback=None,
-                      destination=None,
-                      source=None,
-                      routing_key='',
-                      nowait=False,
-                      arguments=None):
-        start = time.time()
-
-        def callback_wrapper(method_frame):
-            latency = time.time() - start
-            stats['exchange_bind'].append(latency)
-            if callback:
-                callback(method_frame)
-
+    def exchange_bind(self, callback=None, *args, **kwargs):
         return super(DebugChannel, self).exchange_bind(
-            callback_wrapper, destination, source, routing_key, nowait,
-            arguments)
+            wrap('exchange_bind', callback), *args, **kwargs)
 
-    def exchange_declare(self,
-                         callback=None,
-                         exchange=None,
-                         exchange_type='direct',
-                         passive=False,
-                         durable=False,
-                         auto_delete=False,
-                         internal=False,
-                         nowait=False,
-                         arguments=None,
-                         type=None):
-        start = time.time()
-
-        def callback_wrapper(method_frame):
-            latency = time.time() - start
-            stats['exchange_declare'].append(latency)
-            if callback:
-                callback(method_frame)
-
+    def exchange_declare(self, callback=None, *args, **kwargs):
         return super(DebugChannel, self).exchange_declare(
-            callback_wrapper, exchange, exchange_type, passive, durable,
-            auto_delete, internal, nowait, arguments, type)
+            wrap('exchange_declare', callback), *args, **kwargs)
 
-    def exchange_delete(self,
-                        callback=None,
-                        exchange=None,
-                        if_unused=False,
-                        nowait=False):
-        start = time.time()
-
-        def callback_wrapper(method_frame):
-            latency = time.time() - start
-            stats['exchange_delete'].append(latency)
-            if callback:
-                callback(method_frame)
-
+    def exchange_delete(self, callback=None, *args, **kwargs):
         return super(DebugChannel, self).exchange_delete(
-            callback_wrapper, exchange, if_unused, nowait)
+            wrap('exchange_delete', callback), *args, **kwargs)
 
     def exchange_unbind(self, *args, **kwargs):
         return super(DebugChannel, self).exchange_unbind(*args, **kwargs)
 
-    def queue_bind(self,
-                   callback,
-                   queue,
-                   exchange,
-                   routing_key=None,
-                   nowait=False,
-                   arguments=None):
-        start = time.time()
-
-        def callback_wrapper(method_frame):
-            latency = time.time() - start
-            stats['queue_bind'].append(latency)
-            callback(method_frame)
-
+    def queue_bind(self, callback, *args, **kwargs):
         return super(DebugChannel, self).queue_bind(
-            callback_wrapper, queue, exchange, routing_key, nowait, arguments)
+            wrap('queue_bind', callback), *args, **kwargs)
 
-    def queue_declare(self,
-                      callback,
-                      queue='',
-                      passive=False,
-                      durable=False,
-                      exclusive=False,
-                      auto_delete=False,
-                      nowait=False,
-                      arguments=None):
-        start = time.time()
-
-        def callback_wrapper(method_frame):
-            latency = time.time() - start
-            stats['queue_declare'].append(latency)
-            callback(method_frame)
-
+    def queue_declare(self, callback, *args, **kwargs):
         return super(DebugChannel, self).queue_declare(
-            callback_wrapper, queue, passive, durable, exclusive, auto_delete,
-            nowait, arguments)
+            wrap('queue_declare', callback), *args, **kwargs)
