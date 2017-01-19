@@ -81,12 +81,12 @@ def wrap(method, callback):
 
     start = time.time()
 
-    def wrapper(method_frame):
+    def wrapper(*args):
         latency = time.time() - start
         amqp_stats.setdefault(method, manager.list())
         amqp_stats[method] += [latency]
         if callback:
-            callback(method_frame)
+            callback(*args)
 
     return wrapper
 
@@ -118,6 +118,10 @@ class DebugChannel(Channel):
         amqp_stats.setdefault('basic_consume', 0)
         amqp_stats['basic_consume'] += 1
         return super(DebugChannel, self).basic_consume(*args, **kwargs)
+
+    def basic_get(self, callback=None, *args, **kwargs):
+        return super(DebugChannel, self).basic_get(
+            wrap('basic_get', callback), *args, **kwargs)
 
     def basic_publish(self, *args, **kwargs):
         amqp_stats.setdefault('basic_publish', 0)
