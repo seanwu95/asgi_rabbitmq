@@ -2,6 +2,7 @@ import atexit
 import statistics
 import time
 from collections import defaultdict
+from functools import wraps
 from operator import itemgetter
 
 from pika import SelectConnection
@@ -9,26 +10,43 @@ from pika.channel import Channel
 from pika.connection import LOGGER
 from tabulate import tabulate
 
-stats = defaultdict(list)
+amqp_stats = defaultdict(list)
+layer_stats = defaultdict(list)
 
 
 def print_stats():
 
     headers = ['method', 'calls', 'mean', 'median', 'stdev']
-    data = []
-    for method, latencies in stats.items():
-        data.append([
-            method,
-            len(latencies),
-            statistics.mean(latencies),
-            statistics.median(latencies),
-            statistics.stdev(latencies) if len(latencies) > 1 else None,
-        ])
-    data = sorted(data, key=itemgetter(1), reverse=True)
-    print(tabulate(data, headers))
+    for stats in [amqp_stats, layer_stats]:
+        data = []
+        for method, latencies in stats.items():
+            data.append([
+                method,
+                len(latencies),
+                statistics.mean(latencies),
+                statistics.median(latencies),
+                statistics.stdev(latencies) if len(latencies) > 1 else None,
+            ])
+        data = sorted(data, key=itemgetter(1), reverse=True)
+        print(tabulate(data, headers))
 
 
 atexit.register(print_stats)
+
+
+def bench(f):
+    """Collect function call duration statistics."""
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+
+        start = time.time()
+        result = f(*args, **kwargs)
+        latency = time.time() - start
+        layer_stats[f.__name__].append(latency)
+        return result
+
+    return wrapper
 
 
 def wrap(method, callback):
@@ -37,7 +55,7 @@ def wrap(method, callback):
 
     def wrapper(method_frame):
         latency = time.time() - start
-        stats[method].append(latency)
+        amqp_stats[method].append(latency)
         if callback:
             callback(method_frame)
 
