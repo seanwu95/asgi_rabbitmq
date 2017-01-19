@@ -1,8 +1,8 @@
 import atexit
 import statistics
 import time
-from collections import defaultdict
 from functools import wraps
+from multiprocessing import Manager
 from operator import itemgetter
 
 from pika import SelectConnection
@@ -10,8 +10,9 @@ from pika.channel import Channel
 from pika.connection import LOGGER
 from tabulate import tabulate
 
-amqp_stats = defaultdict(list)
-layer_stats = defaultdict(list)
+manager = Manager()
+amqp_stats = manager.dict()
+layer_stats = manager.dict()
 
 
 def print_stats():
@@ -47,7 +48,8 @@ def bench(f):
         start = time.time()
         result = f(*args, **kwargs)
         latency = time.time() - start
-        layer_stats[f.__name__].append(latency)
+        layer_stats.setdefault(f.__name__, manager.list())
+        layer_stats[f.__name__] += [latency]
         return result
 
     return wrapper
@@ -59,7 +61,8 @@ def wrap(method, callback):
 
     def wrapper(method_frame):
         latency = time.time() - start
-        amqp_stats[method].append(latency)
+        amqp_stats.setdefault(method, manager.list())
+        amqp_stats[method] += [latency]
         if callback:
             callback(method_frame)
 
