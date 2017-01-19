@@ -33,16 +33,25 @@ def print_stats():
         if stats:
             data = []
             for method, latencies in stats.items():
-                data.append([
-                    method,
-                    len(latencies),
-                    statistics.mean(latencies),
-                    statistics.median(latencies),
-                    statistics.stdev(latencies)
-                    if len(latencies) > 1 else None,
-                    percentile(latencies, 0.95),
-                    percentile(latencies, 0.99),
-                ])
+                if isinstance(latencies, list):
+                    data.append([
+                        method,
+                        len(latencies),
+                        statistics.mean(latencies),
+                        statistics.median(latencies),
+                        statistics.stdev(latencies)
+                        if len(latencies) > 1 else None,
+                        percentile(latencies, 0.95),
+                        percentile(latencies, 0.99),
+                    ])
+                elif isinstance(latencies, int):
+                    data.append(
+                        [method, latencies, None, None, None, None, None],
+                    )
+                else:
+                    raise Exception(
+                        'Stat(%d) was currupted at method %s' % (num, method),
+                    )
             data = sorted(data, key=itemgetter(1), reverse=True)
             print(tabulate(data, headers))
         else:
@@ -95,6 +104,8 @@ class DebugChannel(Channel):
     """Collect statistics about RabbitMQ methods usage on channel."""
 
     def basic_ack(self, *args, **kwargs):
+        amqp_stats.setdefault('basic_ack', 0)
+        amqp_stats['basic_ack'] += 1
         return super(DebugChannel, self).basic_ack(*args, **kwargs)
 
     def basic_cancel(self, callback=None, *args, **kwargs):
@@ -102,9 +113,15 @@ class DebugChannel(Channel):
             wrap('basic_cancel', callback), *args, **kwargs)
 
     def basic_consume(self, *args, **kwargs):
+        # TODO: Measure latency here, since Consume-Ok is ignored with
+        # `self._on_eventok`.
+        amqp_stats.setdefault('basic_consume', 0)
+        amqp_stats['basic_consume'] += 1
         return super(DebugChannel, self).basic_consume(*args, **kwargs)
 
     def basic_publish(self, *args, **kwargs):
+        amqp_stats.setdefault('basic_publish', 0)
+        amqp_stats['basic_publish'] += 1
         return super(DebugChannel, self).basic_publish(*args, **kwargs)
 
     def exchange_bind(self, callback=None, *args, **kwargs):
