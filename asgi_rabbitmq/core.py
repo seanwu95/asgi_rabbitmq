@@ -1,3 +1,4 @@
+import os
 from functools import partial, wraps
 
 import msgpack
@@ -32,7 +33,9 @@ class AMQP(object):
     Parameters = URLParameters
     Connection = SelectConnection
 
-    # from .amqp import DebugConnection as Connection
+    # Poor man's dependency injection.
+    if 'BENCHMARK' in os.environ:
+        from .amqp import DebugConnection as Connection
 
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
                  method_calls):
