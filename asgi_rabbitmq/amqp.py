@@ -28,7 +28,7 @@ class DebugConnection(SelectConnection):
                 len(latencies),
                 statistics.mean(latencies),
                 statistics.median(latencies),
-                statistics.stdev(latencies),
+                statistics.stdev(latencies) if len(latencies) > 1 else None,
             ])
         print(tabulate(data, headers))
 
@@ -56,8 +56,28 @@ class DebugChannel(Channel):
     def exchange_bind(self, *args, **kwargs):
         return super(DebugChannel, self).exchange_bind(*args, **kwargs)
 
-    def exchange_declare(self, *args, **kwargs):
-        return super(DebugChannel, self).exchange_declare(*args, **kwargs)
+    def exchange_declare(self,
+                         callback=None,
+                         exchange=None,
+                         exchange_type='direct',
+                         passive=False,
+                         durable=False,
+                         auto_delete=False,
+                         internal=False,
+                         nowait=False,
+                         arguments=None,
+                         type=None):
+        start = time.time()
+
+        def callback_wrapper(method_frame):
+            latency = time.time() - start
+            self.connection.stats['exchange_declare'].append(latency)
+            if callback:
+                callback(method_frame)
+
+        return super(DebugChannel, self).exchange_declare(
+            callback_wrapper, exchange, exchange_type, passive, durable,
+            auto_delete, internal, nowait, arguments, type)
 
     def exchange_delete(self, *args, **kwargs):
         return super(DebugChannel, self).exchange_delete(*args, **kwargs)
