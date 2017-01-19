@@ -80,8 +80,9 @@ class DebugChannel(Channel):
         return super(DebugChannel, self).exchange_delete(
             wrap('exchange_delete', callback), *args, **kwargs)
 
-    def exchange_unbind(self, *args, **kwargs):
-        return super(DebugChannel, self).exchange_unbind(*args, **kwargs)
+    def exchange_unbind(self, callback=None, *args, **kwargs):
+        return super(DebugChannel, self).exchange_unbind(
+            wrap('exchange_unbind', callback), *args, **kwargs)
 
     def queue_bind(self, callback, *args, **kwargs):
         return super(DebugChannel, self).queue_bind(
