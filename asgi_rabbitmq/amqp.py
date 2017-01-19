@@ -85,8 +85,22 @@ class DebugChannel(Channel):
     def exchange_unbind(self, *args, **kwargs):
         return super(DebugChannel, self).exchange_unbind(*args, **kwargs)
 
-    def queue_bind(self, *args, **kwargs):
-        return super(DebugChannel, self).queue_bind(*args, **kwargs)
+    def queue_bind(self,
+                   callback,
+                   queue,
+                   exchange,
+                   routing_key=None,
+                   nowait=False,
+                   arguments=None):
+        start = time.time()
+
+        def callback_wrapper(method_frame):
+            latency = time.time() - start
+            self.connection.stats['queue_bind'].append(latency)
+            callback(method_frame)
+
+        return super(DebugChannel, self).queue_bind(
+            callback_wrapper, queue, exchange, routing_key, nowait, arguments)
 
     def queue_declare(self,
                       callback,
