@@ -59,8 +59,9 @@ class DebugChannel(Channel):
     def basic_ack(self, *args, **kwargs):
         return super(DebugChannel, self).basic_ack(*args, **kwargs)
 
-    def basic_cancel(self, *args, **kwargs):
-        return super(DebugChannel, self).basic_cancel(*args, **kwargs)
+    def basic_cancel(self, callback=None, *args, **kwargs):
+        return super(DebugChannel, self).basic_cancel(
+            wrap('basic_cancel', callback), *args, **kwargs)
 
     def basic_consume(self, *args, **kwargs):
         return super(DebugChannel, self).basic_consume(*args, **kwargs)
