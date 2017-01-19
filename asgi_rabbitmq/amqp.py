@@ -17,18 +17,22 @@ layer_stats = defaultdict(list)
 def print_stats():
 
     headers = ['method', 'calls', 'mean', 'median', 'stdev']
-    for stats in [amqp_stats, layer_stats]:
-        data = []
-        for method, latencies in stats.items():
-            data.append([
-                method,
-                len(latencies),
-                statistics.mean(latencies),
-                statistics.median(latencies),
-                statistics.stdev(latencies) if len(latencies) > 1 else None,
-            ])
-        data = sorted(data, key=itemgetter(1), reverse=True)
-        print(tabulate(data, headers))
+    for num, stats in enumerate([amqp_stats, layer_stats], start=1):
+        if stats:
+            data = []
+            for method, latencies in stats.items():
+                data.append([
+                    method,
+                    len(latencies),
+                    statistics.mean(latencies),
+                    statistics.median(latencies),
+                    statistics.stdev(latencies)
+                    if len(latencies) > 1 else None,
+                ])
+            data = sorted(data, key=itemgetter(1), reverse=True)
+            print(tabulate(data, headers))
+        else:
+            print("%d) No statistic available" % num)
 
 
 atexit.register(print_stats)
