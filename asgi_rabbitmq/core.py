@@ -22,7 +22,9 @@ try:
 except ImportError:
     import Queue as queue
 
-if 'BENCHMARK' in os.environ:
+BENCHMARK = 'BENCHMARK' in os.environ
+
+if BENCHMARK:
     from .amqp import bench
 else:
 
@@ -41,7 +43,7 @@ class AMQP(object):
     Connection = SelectConnection
 
     # Poor man's dependency injection.
-    if 'BENCHMARK' in os.environ:
+    if BENCHMARK:
         from .amqp import DebugConnection as Connection
 
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
