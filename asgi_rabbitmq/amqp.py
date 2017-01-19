@@ -97,8 +97,21 @@ class DebugChannel(Channel):
             callback_wrapper, exchange, exchange_type, passive, durable,
             auto_delete, internal, nowait, arguments, type)
 
-    def exchange_delete(self, *args, **kwargs):
-        return super(DebugChannel, self).exchange_delete(*args, **kwargs)
+    def exchange_delete(self,
+                        callback=None,
+                        exchange=None,
+                        if_unused=False,
+                        nowait=False):
+        start = time.time()
+
+        def callback_wrapper(method_frame):
+            latency = time.time() - start
+            stats['exchange_delete'].append(latency)
+            if callback:
+                callback(method_frame)
+
+        return super(DebugChannel, self).exchange_delete(
+            callback_wrapper, exchange, if_unused, nowait)
 
     def exchange_unbind(self, *args, **kwargs):
         return super(DebugChannel, self).exchange_unbind(*args, **kwargs)
