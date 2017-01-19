@@ -53,8 +53,24 @@ class DebugChannel(Channel):
     def basic_publish(self, *args, **kwargs):
         return super(DebugChannel, self).basic_publish(*args, **kwargs)
 
-    def exchange_bind(self, *args, **kwargs):
-        return super(DebugChannel, self).exchange_bind(*args, **kwargs)
+    def exchange_bind(self,
+                      callback=None,
+                      destination=None,
+                      source=None,
+                      routing_key='',
+                      nowait=False,
+                      arguments=None):
+        start = time.time()
+
+        def callback_wrapper(method_frame):
+            latency = time.time() - start
+            self.connection.stats['exchange_bind'].append(latency)
+            if callback:
+                callback(method_frame)
+
+        return super(DebugChannel, self).exchange_bind(
+            callback_wrapper, destination, source, routing_key, nowait,
+            arguments)
 
     def exchange_declare(self,
                          callback=None,
