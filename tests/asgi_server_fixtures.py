@@ -54,10 +54,9 @@ class DaphneProcess(multiprocessing.Process):
 
     def __init__(self, *args, **kwargs):
 
-        if BENCHMARK:
-            self.manager = kwargs.pop('manager')
-            self.amqp_stats = kwargs.pop('amqp_stats')
-            self.layer_stats = kwargs.pop('layer_stats')
+        self.manager = kwargs.pop('manager')
+        self.amqp_stats = kwargs.pop('amqp_stats')
+        self.layer_stats = kwargs.pop('layer_stats')
         self.url = kwargs.pop('url')
         super(DaphneProcess, self).__init__(*args, **kwargs)
         self.daemon = True
@@ -87,10 +86,9 @@ class WorkerProcess(multiprocessing.Process):
 
     def __init__(self, *args, **kwargs):
 
-        if BENCHMARK:
-            self.manager = kwargs.pop('manager')
-            self.amqp_stats = kwargs.pop('amqp_stats')
-            self.layer_stats = kwargs.pop('layer_stats')
+        self.manager = kwargs.pop('manager')
+        self.amqp_stats = kwargs.pop('amqp_stats')
+        self.layer_stats = kwargs.pop('layer_stats')
         self.url = kwargs.pop('url')
         self.threads = kwargs.pop('threads')
         super(WorkerProcess, self).__init__(*args, **kwargs)
