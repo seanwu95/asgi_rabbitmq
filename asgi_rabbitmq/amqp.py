@@ -15,9 +15,20 @@ amqp_stats = manager.dict()
 layer_stats = manager.dict()
 
 
+def percentile(values, fraction):
+    """
+    Returns a percentile value (e.g. fraction = 0.95 -> 95th percentile)
+    """
+    values = sorted(values)
+    stopat = int(len(values) * fraction)
+    if stopat == len(values):
+        stopat -= 1
+    return values[stopat]
+
+
 def print_stats():
 
-    headers = ['method', 'calls', 'mean', 'median', 'stdev']
+    headers = ['method', 'calls', 'mean', 'median', 'stdev', '95%', '99%']
     for num, stats in enumerate([amqp_stats, layer_stats], start=1):
         if stats:
             data = []
@@ -29,6 +40,8 @@ def print_stats():
                     statistics.median(latencies),
                     statistics.stdev(latencies)
                     if len(latencies) > 1 else None,
+                    percentile(latencies, 0.95),
+                    percentile(latencies, 0.99),
                 ])
             data = sorted(data, key=itemgetter(1), reverse=True)
             print(tabulate(data, headers))
