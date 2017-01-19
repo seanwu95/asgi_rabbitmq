@@ -8,3 +8,4 @@ asgi_ipc>=1.2
 requests>=2.12
 websocket_client>=0.40
 tabulate>=0.7
+statistics ; python_version < "3.0"
