@@ -120,6 +120,7 @@ class DebugChannel(Channel):
         return super(DebugChannel, self).basic_consume(*args, **kwargs)
 
     def basic_get(self, callback=None, *args, **kwargs):
+        # TODO: Measure latency for Get-Empty responses.
         return super(DebugChannel, self).basic_get(
             wrap('basic_get', callback), *args, **kwargs)
 
