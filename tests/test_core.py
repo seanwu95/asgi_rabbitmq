@@ -46,7 +46,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         queues = queue_definitions[self.virtual_host]
         return queues
 
-    def declare_queue(self, name):
+    def declare_queue(self, name, arguments=None):
         """Declare queue in current vhost."""
 
         self.management.post_definitions({
@@ -55,7 +55,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
                 'vhost': self.virtual_host,
                 'durable': False,
                 'auto_delete': False,
-                'arguments': {},
+                'arguments': arguments or {},
             }],
         })
 
