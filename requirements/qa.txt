@@ -9,3 +9,5 @@ requests>=2.12
 websocket_client>=0.40
 tabulate>=0.7
 statistics ; python_version < "3.0"
+# TODO: Point to the django/channels after PR.
+git+https://github.com/proofit404/channels.git@feature/benchmark-package#egg=channels-benchmark&subdirectory=testproject
