@@ -13,7 +13,6 @@ env:
     - DJANGO_VERSION="Django>=1.8,<1.9"
     - DJANGO_VERSION="Django>=1.9,<1.10"
     - DJANGO_VERSION="Django>=1.10,<1.11"
-    - DJANGO_VERSION="Django>=1.10,<1.11" RUN_BENCHMARK=1 RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F
 cache:
   directories:
   - $HOME/.cache/pip/wheels
@@ -23,22 +22,7 @@ install:
   - pip install -r requirements/ci.txt
   - pip install "${DJANGO_VERSION}"
   - pip install .
-  - if [ -n "$RUN_BENCHMARK" ] ;
-    then
-        git clone https://github.com/django/channels.git $HOME/channels/ ;
-        cd $HOME/channels ;
-        git reset --hard origin/master ;
-    fi
 script:
-  - if [ -z "$RUN_BENCHMARK" ] ;
-    then
-        coverage run -m pytest -v -s ;
-    else
-        cd $HOME/channels/testproject/ ;
-        PYTHONPATH=$PWD daphne -e tcp:port=8000:interface=127.0.0.1 testproject.asgi.rabbitmq:channel_layer &
-        python manage.py runworker --settings=testproject.settings.channels_rabbitmq &
-        sleep 1 ;
-        python benchmark.py ws://127.0.0.1:8000 ;
-    fi
+  - coverage run -m pytest -v -s
 after_success:
   - codecov
