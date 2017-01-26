@@ -25,26 +25,24 @@ def test_websocket_message(asgi_server):
     assert 'test' == response
 
 
-class Benchmarker(benchmark.Benchmarker):
-
-    def print_progress(self):
-
-        print('.', end='', flush=True)
-        open_protocols = len([x for x in benchmark.stats.values() if not x])
-        if open_protocols == 0 and len(benchmark.stats) >= self.num:
-            reactor.stop()
-            self.print_stats()
+# asgi_server is a parametized fixture, but twisted reactor was
+# designed to run only ones.  This is the dirty hack to make
+# test_benchmark function idempotent.
+run_benchmark = True
 
 
 def test_benchmark(asgi_server):
 
-    benchmarker = Benchmarker(
-        url='ws://%s:%d' % asgi_server,
-        num=100,
-        concurrency=10,
-        rate=1,
-        messages=5,
-        spawn=30,
-    )
-    benchmarker.loop()
-    reactor.run()
+    global run_benchmark
+    if run_benchmark:
+        benchmarker = benchmark.Benchmarker(
+            url='ws://%s:%d' % asgi_server,
+            num=100,
+            concurrency=10,
+            rate=1,
+            messages=5,
+            spawn=30,
+        )
+        benchmarker.loop()
+        reactor.run(installSignalHandlers=False)
+        run_benchmark = False
