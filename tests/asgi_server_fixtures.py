@@ -68,6 +68,7 @@ class WorkerProcess(multiprocessing.Process):
 
     def run(self):
 
+        django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
         channel_layer = ChannelLayerWrapper(
             channel_layer=asgi_layer,
