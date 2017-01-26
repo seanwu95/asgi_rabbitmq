@@ -1,9 +1,12 @@
 import multiprocessing
+import os
+import signal
 import time
 
 import django
 import pytest
 from asgi_rabbitmq import RabbitmqChannelLayer
+from asgi_rabbitmq.amqp import print_stats
 from channels.asgi import ChannelLayerWrapper
 from channels.worker import Worker, WorkerGroup
 from daphne.server import Server
@@ -42,6 +45,7 @@ class DaphneProcess(multiprocessing.Process):
 
     def run(self):
 
+        signal.signal(signal.SIGTERM, at_exit)
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
         channel_layer = ChannelLayerWrapper(
@@ -68,6 +72,7 @@ class WorkerProcess(multiprocessing.Process):
 
     def run(self):
 
+        signal.signal(signal.SIGTERM, at_exit)
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
         channel_layer = ChannelLayerWrapper(
@@ -89,3 +94,10 @@ class WorkerProcess(multiprocessing.Process):
             )
         worker.ready()
         worker.run()
+
+
+def at_exit(signum, frame):
+
+    print_stats()
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)

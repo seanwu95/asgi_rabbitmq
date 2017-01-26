@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import atexit
 import statistics
 import time
@@ -51,6 +53,7 @@ def print_stats():
                         'Stat(%d) was currupted at method %s' % (num, method),
                     )
             data = sorted(data, key=itemgetter(1), reverse=True)
+            print()
             print(tabulate(data, headers))
         else:
             print("%d) No statistic available" % num)
