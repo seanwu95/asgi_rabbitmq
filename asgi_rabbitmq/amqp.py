@@ -2,7 +2,6 @@ import atexit
 import statistics
 import time
 from functools import wraps
-from multiprocessing import Manager
 from operator import itemgetter
 
 from pika import SelectConnection
@@ -10,9 +9,8 @@ from pika.channel import Channel
 from pika.connection import LOGGER
 from tabulate import tabulate
 
-manager = Manager()
-amqp_stats = manager.dict()
-layer_stats = manager.dict()
+amqp_stats = {}
+layer_stats = {}
 
 
 def percentile(values, fraction):
@@ -70,7 +68,7 @@ def bench(f):
         start = time.time()
         result = f(*args, **kwargs)
         latency = time.time() - start
-        layer_stats.setdefault(f.__name__, manager.list())
+        layer_stats.setdefault(f.__name__, [])
         layer_stats[f.__name__] += [latency]
         return result
 
@@ -83,7 +81,7 @@ def wrap(method, callback):
 
     def wrapper(*args):
         latency = time.time() - start
-        amqp_stats.setdefault(method, manager.list())
+        amqp_stats.setdefault(method, [])
         amqp_stats[method] += [latency]
         if callback:
             callback(*args)
