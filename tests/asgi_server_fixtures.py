@@ -21,7 +21,7 @@ def asgi_server(request, rabbitmq_url):
         host = server_process.host
     else:
         host = '127.0.0.1'
-    time.sleep(2)
+    time.sleep(5)
     yield host, server_process.port
     server_process.terminate()
     server_process.join()
