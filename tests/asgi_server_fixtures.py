@@ -2,23 +2,24 @@ import multiprocessing
 import os
 import signal
 import time
+from functools import partial
 
 import django
 import pytest
-from asgi_rabbitmq import RabbitmqChannelLayer
-from asgi_rabbitmq.amqp import print_stats
+from asgi_rabbitmq import RabbitmqChannelLayer, amqp
 from channels.asgi import ChannelLayerWrapper
 from channels.worker import Worker, WorkerGroup
 from daphne.server import Server
 
 
 @pytest.fixture(params=[1, 4])
-def asgi_server(request, rabbitmq_url):
+def asgi_server(request, rabbitmq_url, statdir):
     """Daphne Live Server."""
 
-    worker_process = WorkerProcess(url=rabbitmq_url, threads=request.param)
+    worker_process = WorkerProcess(
+        url=rabbitmq_url, threads=request.param, todir=statdir)
     worker_process.start()
-    server_process = DaphneProcess(url=rabbitmq_url)
+    server_process = DaphneProcess(url=rabbitmq_url, todir=statdir)
     server_process.start()
     if server_process.host != '0.0.0.0':
         host = server_process.host
@@ -40,12 +41,14 @@ class DaphneProcess(multiprocessing.Process):
     def __init__(self, *args, **kwargs):
 
         self.url = kwargs.pop('url')
+        self.todir = kwargs.pop('todir')
         super(DaphneProcess, self).__init__(*args, **kwargs)
         self.daemon = True
 
     def run(self):
 
-        signal.signal(signal.SIGTERM, at_exit)
+        amqp.maybe_monkeypatch()
+        signal.signal(signal.SIGTERM, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
         channel_layer = ChannelLayerWrapper(
@@ -67,12 +70,14 @@ class WorkerProcess(multiprocessing.Process):
 
         self.url = kwargs.pop('url')
         self.threads = kwargs.pop('threads')
+        self.todir = kwargs.pop('todir')
         super(WorkerProcess, self).__init__(*args, **kwargs)
         self.daemon = True
 
     def run(self):
 
-        signal.signal(signal.SIGTERM, at_exit)
+        amqp.maybe_monkeypatch()
+        signal.signal(signal.SIGTERM, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
         channel_layer = ChannelLayerWrapper(
@@ -96,8 +101,9 @@ class WorkerProcess(multiprocessing.Process):
         worker.run()
 
 
-def at_exit(signum, frame):
+def at_exit(todir, signum, frame):
 
-    print_stats()
+    if amqp.BENCHMARK:
+        amqp.save_stats(todir)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     os.kill(os.getpid(), signum)

@@ -1,4 +1,3 @@
-import os
 from functools import partial, wraps
 
 import msgpack
@@ -22,15 +21,6 @@ try:
 except ImportError:
     import Queue as queue
 
-BENCHMARK = 'BENCHMARK' in os.environ
-
-if BENCHMARK:
-    from .amqp import bench
-else:
-
-    def bench(f):
-        return f
-
 
 class PropagatedError(Exception):
     """Exception raised to show error from the connection thread."""
@@ -41,10 +31,6 @@ class AMQP(object):
     dead_letters = 'dead-letters'
     Parameters = URLParameters
     Connection = SelectConnection
-
-    # Poor man's dependency injection.
-    if BENCHMARK:
-        from .amqp import DebugConnection as Connection
 
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
                  method_calls):
@@ -497,7 +483,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     # FIXME: Handle queue.Full exception in all method calls blow.
 
-    @bench
     def send(self, channel, message):
 
         future = Future()
@@ -510,7 +495,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             ))
         return future.result()
 
-    @bench
     def receive(self, channels, block=False):
 
         future = Future()
@@ -526,7 +510,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         except PropagatedError:
             return None, None
 
-    @bench
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
@@ -551,7 +534,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             ))
         return future.result()
 
-    @bench
     def group_add(self, group, channel):
 
         future = Future()
@@ -564,7 +546,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             ))
         return future.result()
 
-    @bench
     def group_discard(self, group, channel):
 
         future = Future()
@@ -577,7 +558,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             ))
         return future.result()
 
-    @bench
     def send_group(self, group, message):
 
         self.schedule(

@@ -6,6 +6,7 @@ except AttributeError:
     pass
 
 pytest_plugins = [
-    'management_fixtures',
     'asgi_server_fixtures',
+    'benchmark_fixtures',
+    'management_fixtures',
 ]

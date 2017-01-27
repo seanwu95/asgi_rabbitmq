@@ -1,11 +1,15 @@
 from __future__ import print_function
 
-import atexit
+import glob
+import json
+import os
+import random
 import statistics
 import time
 from functools import wraps
 from operator import itemgetter
 
+import asgi_rabbitmq
 from pika import SelectConnection
 from pika.channel import Channel
 from pika.connection import LOGGER
@@ -13,6 +17,41 @@ from tabulate import tabulate
 
 amqp_stats = {}
 layer_stats = {}
+
+BENCHMARK = 'BENCHMARK' in os.environ
+
+
+def maybe_monkeypatch():
+
+    if BENCHMARK:
+        monkeypatch_all()
+
+
+def maybe_print_stats(fromdir):
+
+    if BENCHMARK:
+        print_stats(fromdir)
+
+
+def monkeypatch_all():
+    monkeypatch_connection()
+    monkeypatch_layer()
+
+
+def monkeypatch_connection():
+
+    asgi_rabbitmq.core.AMQP.Connection = DebugConnection
+
+
+def monkeypatch_layer():
+
+    layer = asgi_rabbitmq.core.RabbitmqChannelLayer
+    layer.send = bench(layer.send)
+    layer.receive = bench(layer.receive)
+    layer.new_channel = bench(layer.new_channel)
+    layer.group_add = bench(layer.group_add)
+    layer.group_discard = bench(layer.group_discard)
+    layer.send_group = bench(layer.send_group)
 
 
 def percentile(values, fraction):
@@ -26,8 +65,19 @@ def percentile(values, fraction):
     return values[stopat]
 
 
-def print_stats():
-
+def print_stats(fromdir):
+    for statfile in glob.glob('%s/*.dump' % fromdir):
+        with open(statfile) as f:
+            statblob = f.read()
+        statdata = json.loads(statblob)
+        for num, stat in enumerate([amqp_stats, layer_stats]):
+            for k, v in statdata[num].items():
+                if isinstance(v, list):
+                    stat.setdefault(k, [])
+                    stat[k].extend(v)
+                else:
+                    stat.setdefault(k, 0)
+                    stat[k] += v
     headers = ['method', 'calls', 'mean', 'median', 'stdev', '95%', '99%']
     for num, stats in enumerate([amqp_stats, layer_stats], start=1):
         if stats:
@@ -59,7 +109,13 @@ def print_stats():
             print("%d) No statistic available" % num)
 
 
-atexit.register(print_stats)
+def save_stats(todir):
+
+    statdata = [amqp_stats, layer_stats]
+    statblob = json.dumps(statdata)
+    path = os.path.join(todir, '%d.dump' % random.randint(0, 100))
+    with open(path, 'w') as f:
+        f.write(statblob)
 
 
 def bench(f):
