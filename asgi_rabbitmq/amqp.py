@@ -51,7 +51,7 @@ def monkeypatch_layer():
     layer.new_channel = bench(layer.new_channel)
     layer.group_add = bench(layer.group_add)
     layer.group_discard = bench(layer.group_discard)
-    layer.send_group = bench(layer.send_group)
+    layer.send_group = bench(layer.send_group, count=True)
 
 
 def percentile(values, fraction):
@@ -118,18 +118,27 @@ def save_stats(todir):
         f.write(statblob)
 
 
-def bench(f):
+def bench(f, count=False):
     """Collect function call duration statistics."""
 
-    @wraps(f)
-    def wrapper(*args, **kwargs):
+    if count:
 
-        start = time.time()
-        result = f(*args, **kwargs)
-        latency = time.time() - start
-        layer_stats.setdefault(f.__name__, [])
-        layer_stats[f.__name__] += [latency]
-        return result
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            layer_stats.setdefault(f.__name__, 0)
+            layer_stats[f.__name__] += 1
+            return f(*args, **kwargs)
+    else:
+
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+
+            start = time.time()
+            result = f(*args, **kwargs)
+            latency = time.time() - start
+            layer_stats.setdefault(f.__name__, [])
+            layer_stats[f.__name__] += [latency]
+            return result
 
     return wrapper
 
