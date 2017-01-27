@@ -224,3 +224,20 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         # If all things goes fine, this line will be executed
         # successfully.
         self.channel_layer.group_add('my_group', 'foo')
+
+    def test_receive_blocking_mode(self):
+        """Check we can wait until message arrives and return it."""
+
+        self.declare_queue('foo', {'x-dead-letter-exchange': 'dead-letters'})
+
+        def wait_and_send():
+            time.sleep(1)
+            self.channel_layer.send('foo', {'bar': 'baz'})
+
+        thread = threading.Thread(target=wait_and_send)
+        thread.deamon = True
+        thread.start()
+
+        channel, message = self.channel_layer.receive(['foo'], block=True)
+        assert channel == 'foo'
+        assert message == {'bar': 'baz'}
