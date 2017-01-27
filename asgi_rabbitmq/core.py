@@ -297,8 +297,7 @@ class AMQP(object):
     @propagate_error
     def no_queue(self, amqp_channel, code, msg, channels, resolve):
 
-        ident = next(k for k, v in self.channels.items() if v is amqp_channel)
-        self.method_calls.put((ident, partial(
+        self.method_calls.put((resolve.ident, partial(
             self.receive,
             channels=channels,
             block=False,
@@ -546,6 +545,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def receive(self, channels, block=False):
 
         future = Future()
+        future.ident = get_ident()
         self.schedule(
             partial(
                 self.thread.amqp.receive,
