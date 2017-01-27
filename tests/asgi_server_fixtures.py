@@ -4,9 +4,10 @@ import signal
 import time
 from functools import partial
 
+import amqpstat
 import django
 import pytest
-from asgi_rabbitmq import RabbitmqChannelLayer, amqp
+from asgi_rabbitmq import RabbitmqChannelLayer
 from channels.asgi import ChannelLayerWrapper
 from channels.worker import Worker, WorkerGroup
 from daphne.server import Server
@@ -47,7 +48,7 @@ class DaphneProcess(multiprocessing.Process):
 
     def run(self):
 
-        amqp.maybe_monkeypatch()
+        amqpstat.maybe_monkeypatch()
         signal.signal(signal.SIGTERM, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
@@ -76,7 +77,7 @@ class WorkerProcess(multiprocessing.Process):
 
     def run(self):
 
-        amqp.maybe_monkeypatch()
+        amqpstat.maybe_monkeypatch()
         signal.signal(signal.SIGTERM, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
@@ -103,7 +104,7 @@ class WorkerProcess(multiprocessing.Process):
 
 def at_exit(todir, signum, frame):
 
-    if amqp.BENCHMARK:
-        amqp.save_stats(todir)
+    if amqpstat.BENCHMARK:
+        amqpstat.save_stats(todir)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     os.kill(os.getpid(), signum)
