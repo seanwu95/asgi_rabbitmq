@@ -228,13 +228,15 @@ class AMQP(object):
                 return
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel = channels[0]
+            get_empty_callback = lambda method_frame: self.no_message(
+                method_frame=method_frame,
+                amqp_channel=amqp_channel,
+                channels=channels[1:],
+                resolve=resolve)
             amqp_channel.add_callback(
                 replies=[Basic.GetEmpty],
-                callback=lambda method_frame: self.no_message(
-                    method_frame=method_frame,
-                    amqp_channel=amqp_channel,
-                    channels=channels[1:],
-                    resolve=resolve))
+                callback=get_empty_callback,
+            )
             amqp_channel.basic_get(
                 queue=self.get_queue_name(channel),
                 callback=lambda amqp_channel, method_frame, properties, body: (
@@ -244,7 +246,8 @@ class AMQP(object):
                         properties=properties,
                         body=body,
                         channel=channel,
-                        resolve=resolve)))
+                        resolve=resolve,
+                        get_empty_callback=get_empty_callback)))
             return lambda amqp_channel, code, msg: self.no_queue(
                 amqp_channel=amqp_channel,
                 code=code,
@@ -275,8 +278,13 @@ class AMQP(object):
 
     @propagate_error
     def get_message(self, amqp_channel, method_frame, properties, body,
-                    channel, resolve):
+                    channel, resolve, get_empty_callback):
 
+        amqp_channel.callbacks.remove(
+            amqp_channel.channel_number,
+            Basic.GetEmpty,
+            get_empty_callback,
+        )
         amqp_channel.basic_ack(method_frame.delivery_tag)
         message = self.deserialize(body)
         resolve.set_result((channel, message))
