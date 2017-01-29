@@ -3,6 +3,7 @@ import os
 import signal
 import time
 from functools import partial
+from itertools import count
 
 import amqpstat
 import django
@@ -28,8 +29,12 @@ def asgi_server(request, rabbitmq_url, statdir):
         host = '127.0.0.1'
     time.sleep(5)
     yield host, server_process.port
+    os.kill(server_process.pid, signal.SIGCHLD)
+    time.sleep(0.1)
     server_process.terminate()
     server_process.join()
+    os.kill(worker_process.pid, signal.SIGCHLD)
+    time.sleep(0.1)
     worker_process.terminate()
     worker_process.join()
 
@@ -37,7 +42,7 @@ def asgi_server(request, rabbitmq_url, statdir):
 class DaphneProcess(multiprocessing.Process):
 
     host = '0.0.0.0'
-    port = 8000
+    port_factory = count(8000)
 
     def __init__(self, *args, **kwargs):
 
@@ -45,11 +50,12 @@ class DaphneProcess(multiprocessing.Process):
         self.todir = kwargs.pop('todir')
         super(DaphneProcess, self).__init__(*args, **kwargs)
         self.daemon = True
+        self.port = next(self.port_factory)
 
     def run(self):
 
         amqpstat.maybe_monkeypatch()
-        signal.signal(signal.SIGTERM, partial(at_exit, self.todir))
+        signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
         channel_layer = ChannelLayerWrapper(
@@ -78,7 +84,7 @@ class WorkerProcess(multiprocessing.Process):
     def run(self):
 
         amqpstat.maybe_monkeypatch()
-        signal.signal(signal.SIGTERM, partial(at_exit, self.todir))
+        signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
         asgi_layer = RabbitmqChannelLayer(url=self.url)
         channel_layer = ChannelLayerWrapper(
@@ -106,5 +112,3 @@ def at_exit(todir, signum, frame):
 
     if amqpstat.BENCHMARK:
         amqpstat.save_stats(todir)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    os.kill(os.getpid(), signum)
