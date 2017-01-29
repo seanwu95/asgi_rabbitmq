@@ -219,6 +219,7 @@ class AMQP(object):
                         body=body,
                     ),
                     queue=self.get_queue_name(channel),
+                    no_ack=True,
                 )
                 consumer_tags[tag] = channel
         else:
@@ -239,6 +240,7 @@ class AMQP(object):
             )
             amqp_channel.basic_get(
                 queue=self.get_queue_name(channel),
+                no_ack=True,
                 callback=lambda amqp_channel, method_frame, properties, body: (
                     self.get_message(
                         amqp_channel=amqp_channel,
@@ -269,7 +271,6 @@ class AMQP(object):
     def consume_message(self, amqp_channel, method_frame, properties, body,
                         consumer_tags, resolve):
 
-        amqp_channel.basic_ack(method_frame.delivery_tag)
         for tag in consumer_tags:
             amqp_channel.basic_cancel(consumer_tag=tag)
         channel = consumer_tags[method_frame.consumer_tag]
@@ -285,7 +286,6 @@ class AMQP(object):
             Basic.GetEmpty,
             get_empty_callback,
         )
-        amqp_channel.basic_ack(method_frame.delivery_tag)
         message = self.deserialize(body)
         resolve.set_result((channel, message))
 
@@ -455,11 +455,11 @@ class AMQP(object):
         amqp_channel.basic_consume(
             self.on_dead_letter,
             queue=self.dead_letters,
+            no_ack=True,
         )
 
     def on_dead_letter(self, amqp_channel, method_frame, properties, body):
 
-        amqp_channel.basic_ack(method_frame.delivery_tag)
         # FIXME: Ignore max-length dead-letters.
         # FIXME: what the hell zero means here?
         queue = properties.headers['x-death'][0]['queue']
