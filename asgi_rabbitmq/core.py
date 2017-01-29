@@ -1,3 +1,4 @@
+from collections import deque
 from functools import partial, wraps
 
 import msgpack
@@ -46,6 +47,7 @@ class AMQP(object):
         self.channel_capacity = channel_capacity
         self.method_calls = method_calls
         self.channels = {}
+        self.messages = {}
 
     # Connection handling.
 
@@ -151,48 +153,45 @@ class AMQP(object):
     @propagate_on_close
     def send(self, amqp_channel, channel, message, resolve):
 
-        # FIXME: Avoid constant queue declaration.  Or at least try to
-        # minimize its impact to system.
-        queue = self.get_queue_name(channel)
-        publish_message = partial(
-            self.publish_message,
-            amqp_channel=amqp_channel,
-            channel=queue,
-            message=message,
-            resolve=resolve,
-        )
-        self.declare_channel(
-            amqp_channel=amqp_channel,
-            channel=queue,
-            passive=True if '!' in channel or '?' in channel else False,
-            callback=publish_message,
-        )
-
-    def declare_channel(self, amqp_channel, channel, passive, callback):
-
-        amqp_channel.queue_declare(
-            lambda method_frame: callback(method_frame=method_frame),
-            queue=channel,
-            passive=passive,
-            arguments={'x-dead-letter-exchange': self.dead_letters},
-        )
-
-    @propagate_error
-    def publish_message(self, amqp_channel, channel, message, resolve,
-                        method_frame):
-
-        if method_frame.method.message_count >= self.capacity:
-            raise RabbitmqChannelLayer.ChannelFull
+        routing_key = self.get_queue_name(channel)
         body = self.serialize(message)
         expiration = str(self.expiry * 1000)
         properties = BasicProperties(expiration=expiration)
         amqp_channel.basic_publish(
             exchange='',
-            routing_key=channel,
+            routing_key=routing_key,
             body=body,
             properties=properties,
         )
         resolve.set_result(None)
+
+    def declare_channel(self, amqp_channel, channel, resolve):
+
+        amqp_channel.queue_declare(
+            lambda method_frame: self.subscribe_to_channel(
+                amqp_channel,
+                channel,
+                resolve,
+            ),
+            queue=channel,
+            arguments={'x-dead-letter-exchange': self.dead_letters},
+        )
+
+    def subscribe_to_channel(self, amqp_channel, channel, resolve):
+
+        self.messages[channel] = deque()
+        amqp_channel.basic_consume(
+            partial(
+                self.accept_message, channel=channel),
+            queue=self.get_queue_name(channel),
+            no_ack=True,
+        )
+        resolve.set_result(channel)
+
+    def accept_message(self, amqp_channel, method_frame, properties, body,
+                       channel):
+
+        self.messages[channel].append(body)
 
     # Receive.
 
@@ -200,117 +199,16 @@ class AMQP(object):
     @propagate_on_close
     def receive(self, amqp_channel, channels, block, resolve):
 
-        if block:
-            consumer_tags = {}
-            callback = partial(
-                self.consume_message,
-                consumer_tags=consumer_tags,
-                resolve=resolve,
-            )
-            for channel in channels:
-                tag = amqp_channel.basic_consume(
-                    lambda amqp_channel,
-                    method_frame,
-                    properties,
-                    body: callback(
-                        amqp_channel=amqp_channel,
-                        method_frame=method_frame,
-                        properties=properties,
-                        body=body,
-                    ),
-                    queue=self.get_queue_name(channel),
-                    no_ack=True,
-                )
-                consumer_tags[tag] = channel
-        else:
-            if not channels:
-                # All channels gave 404 error.
-                resolve.set_result((None, None))
-                return
-            channels = list(channels)  # Daphne sometimes pass dict.keys()
-            channel = channels[0]
-            get_empty_callback = lambda method_frame: self.no_message(
-                method_frame=method_frame,
-                amqp_channel=amqp_channel,
-                channels=channels[1:],
-                resolve=resolve)
-            amqp_channel.add_callback(
-                replies=[Basic.GetEmpty],
-                callback=get_empty_callback,
-            )
-            amqp_channel.basic_get(
-                queue=self.get_queue_name(channel),
-                no_ack=True,
-                callback=lambda amqp_channel, method_frame, properties, body: (
-                    self.get_message(
-                        amqp_channel=amqp_channel,
-                        method_frame=method_frame,
-                        properties=properties,
-                        body=body,
-                        channel=channel,
-                        resolve=resolve,
-                        get_empty_callback=get_empty_callback)))
-            return lambda amqp_channel, code, msg: self.no_queue(
-                amqp_channel=amqp_channel,
-                code=code,
-                msg=msg,
-                channels=channels[1:],
-                resolve=resolve,
-            )
-
-    # FIXME: If we tries to consume from list of channels.  One of
-    # consumer queues doesn't exists.  Channel is closed with 404
-    # error. We will never consume from existing queues and will
-    # return empty response.
-    #
-    # FIXME: If we tries to consume from channel which queue doesn't
-    # exist at this time.  We consume with blocking == True.  We must
-    # start consuming at the moment when queue were declared.
-
-    @propagate_error
-    def consume_message(self, amqp_channel, method_frame, properties, body,
-                        consumer_tags, resolve):
-
-        for tag in consumer_tags:
-            amqp_channel.basic_cancel(consumer_tag=tag)
-        channel = consumer_tags[method_frame.consumer_tag]
-        message = self.deserialize(body)
-        resolve.set_result((channel, message))
-
-    @propagate_error
-    def get_message(self, amqp_channel, method_frame, properties, body,
-                    channel, resolve, get_empty_callback):
-
-        amqp_channel.callbacks.remove(
-            amqp_channel.channel_number,
-            Basic.GetEmpty,
-            get_empty_callback,
-        )
-        message = self.deserialize(body)
-        resolve.set_result((channel, message))
-
-    @propagate_error
-    def no_message(self, amqp_channel, method_frame, channels, resolve):
-
-        if channels:
-            self.receive(
-                amqp_channel=amqp_channel,
-                channels=channels,
-                block=False,
-                resolve=resolve,
-            )
+        for channel in channels:
+            queue = self.get_queue_name(channel)
+            messages = self.messages.get(queue)
+            if messages:
+                body = messages.popleft()
+                message = self.deserialize(body)
+                resolve.set_result((channel, message))
+                break
         else:
             resolve.set_result((None, None))
-
-    @propagate_error
-    def no_queue(self, amqp_channel, code, msg, channels, resolve):
-
-        self.method_calls.put((resolve.ident, partial(
-            self.receive,
-            channels=channels,
-            block=False,
-            resolve=resolve,
-        )))
 
     # New channel.
 
@@ -319,7 +217,11 @@ class AMQP(object):
     def new_channel(self, amqp_channel, resolve):
 
         amqp_channel.queue_declare(
-            lambda method_frame: resolve.set_result(method_frame.method.queue),
+            lambda method_frame: self.subscribe_to_channel(
+                amqp_channel,
+                method_frame.method.queue,
+                resolve,
+            ),
         )
 
     # Groups.
@@ -553,7 +455,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def receive(self, channels, block=False):
 
         future = Future()
-        future.ident = get_ident()
         self.schedule(
             partial(
                 self.thread.amqp.receive,
@@ -582,8 +483,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             partial(
                 self.thread.amqp.declare_channel,
                 channel=channel,
-                passive=False,
-                callback=lambda method_frame: future.set_result(None),
+                resolve=future,
             ))
         return future.result()
 
