@@ -3,6 +3,7 @@ import os
 import signal
 import time
 from functools import partial
+from itertools import count
 
 import amqpstat
 import django
@@ -37,7 +38,7 @@ def asgi_server(request, rabbitmq_url, statdir):
 class DaphneProcess(multiprocessing.Process):
 
     host = '0.0.0.0'
-    port = 8000
+    port_factory = count(8000)
 
     def __init__(self, *args, **kwargs):
 
@@ -45,6 +46,7 @@ class DaphneProcess(multiprocessing.Process):
         self.todir = kwargs.pop('todir')
         super(DaphneProcess, self).__init__(*args, **kwargs)
         self.daemon = True
+        self.port = next(self.port_factory)
 
     def run(self):
 
