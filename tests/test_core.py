@@ -11,6 +11,7 @@ from channels.routing import null_consumer, route
 from channels.worker import Worker
 
 
+@pytest.mark.skip
 class RabbitmqChannelLayerTest(ConformanceTestCase):
 
     @pytest.fixture(autouse=True)
