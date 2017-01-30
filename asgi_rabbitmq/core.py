@@ -5,7 +5,7 @@ import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
-from pika.spec import Basic, BasicProperties
+from pika.spec import BasicProperties
 
 try:
     from concurrent.futures import Future
@@ -48,6 +48,7 @@ class AMQP(object):
         self.method_calls = method_calls
         self.channels = {}
         self.messages = {}
+        self.blocked = {}
 
     # Connection handling.
 
@@ -191,7 +192,13 @@ class AMQP(object):
     def accept_message(self, amqp_channel, method_frame, properties, body,
                        channel):
 
-        self.messages[channel].append(body)
+        for resolve, channels in self.blocked.items():
+            if channel in channels:
+                del self.blocked[resolve]
+                resolve.set_result((channel, self.deserialize(body)))
+                break
+        else:
+            self.messages[channel].append(body)
 
     # Receive.
 
@@ -200,26 +207,28 @@ class AMQP(object):
     def receive(self, amqp_channel, channels, block, resolve):
 
         for channel in channels:
-            queue = self.get_queue_name(channel)
-            messages = self.messages.get(queue)
+            messages = self.messages.get(channel)
             if messages:
                 body = messages.popleft()
                 message = self.deserialize(body)
                 resolve.set_result((channel, message))
                 break
         else:
-            resolve.set_result((None, None))
+            if block:
+                self.blocked[resolve] = channels
+            else:
+                resolve.set_result((None, None))
 
     # New channel.
 
     @propagate_error
     @propagate_on_close
-    def new_channel(self, amqp_channel, resolve):
+    def new_channel(self, amqp_channel, pattern, resolve):
 
         amqp_channel.queue_declare(
             lambda method_frame: self.subscribe_to_channel(
                 amqp_channel,
-                method_frame.method.queue,
+                pattern + method_frame.method.queue,
                 resolve,
             ),
         )
@@ -468,13 +477,13 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         assert pattern.endswith('!') or pattern.endswith('?')
         future = Future()
-        self.schedule(partial(
-            self.thread.amqp.new_channel,
-            resolve=future,
-        ))
-        queue_name = future.result()
-        channel = pattern + queue_name
-        return channel
+        self.schedule(
+            partial(
+                self.thread.amqp.new_channel,
+                pattern=pattern,
+                resolve=future,
+            ))
+        return future.result()
 
     def declare_channel(self, channel):
 
