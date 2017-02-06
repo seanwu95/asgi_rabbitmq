@@ -48,6 +48,7 @@ def monkeypatch_layer():
     layer = asgi_rabbitmq.core.RabbitmqChannelLayer
     layer.send = bench(layer.send)
     layer.receive = bench(layer.receive)
+    layer.receive_twisted = bench(layer.receive_twisted, count=True)
     layer.new_channel = bench(layer.new_channel)
     layer.group_add = bench(layer.group_add)
     layer.group_discard = bench(layer.group_discard)
