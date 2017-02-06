@@ -1,3 +1,4 @@
+git+https://github.com/proofit404/daphne.git@feature/twisted-support#egg=daphne-1.0.3
 git+https://github.com/django/asgiref.git#egg=asgiref-1.0.1
 pytest>=3.0
 pytest-django>=3.0
