@@ -6,6 +6,7 @@ from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
 from pika.spec import BasicProperties
+from twisted.internet import defer, reactor
 
 try:
     from concurrent.futures import Future
@@ -182,8 +183,7 @@ class AMQP(object):
 
         self.messages[channel] = deque()
         amqp_channel.basic_consume(
-            partial(
-                self.accept_message, channel=channel),
+            partial(self.accept_message, channel=channel),
             queue=self.get_queue_name(channel),
             no_ack=True,
         )
@@ -193,7 +193,8 @@ class AMQP(object):
                        channel):
 
         for resolve, channels in self.blocked.items():
-            if channel in channels:
+            # FIXME: None channels is a hack here to try Twisted support.
+            if channels is None or channel in channels:
                 del self.blocked[resolve]
                 resolve.set_result((channel, self.deserialize(body)))
                 break
@@ -218,6 +219,17 @@ class AMQP(object):
                 self.blocked[resolve] = channels
             else:
                 resolve.set_result((None, None))
+
+    def receive_twisted(self, amqp_channel, resolve):
+
+        for channel, messages in self.messages.items():
+            if messages:
+                body = messages.popleft()
+                message = self.deserialize(body)
+                resolve.set_result((channel, message))
+                break
+        else:
+            self.blocked[resolve] = None
 
     # New channel.
 
@@ -428,7 +440,7 @@ class ConnectionThread(Thread):
 
 class RabbitmqChannelLayer(BaseChannelLayer):
 
-    extensions = ['groups']
+    extensions = ['groups', 'twisted']
 
     def __init__(self,
                  url,
@@ -472,6 +484,25 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                 resolve=future,
             ))
         return future.result()
+
+    @defer.inlineCallbacks
+    def receive_twisted(self):
+        """Twisted-native implementation of receive."""
+
+        deferred = defer.Deferred()
+
+        def resolve_deferred(future):
+
+            reactor.callFromThread(deferred.callback, future.result())
+
+        future = Future()
+        future.add_done_callback(resolve_deferred)
+        self.schedule(
+            partial(
+                self.thread.amqp.receive_twisted,
+                resolve=future,
+            ))
+        defer.returnValue((yield deferred))
 
     def new_channel(self, pattern):
 
