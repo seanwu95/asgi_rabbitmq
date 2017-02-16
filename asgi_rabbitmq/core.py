@@ -536,8 +536,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                                        channel_capacity)
         self.thread.start()
 
-    # FIXME: Handle queue.Full exception in all method calls blow.
-
     def send(self, channel, message):
 
         future = Future()
