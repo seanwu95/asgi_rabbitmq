@@ -236,14 +236,17 @@ class AMQP(object):
 
     # Declare channel.
 
-    def declare_channel(self, amqp_channel, channel, passive, callback):
+    def declare_channel(self, channel):
 
-        amqp_channel.queue_declare(
-            lambda method_frame: callback(method_frame=method_frame),
+        self.amqp_channel.queue_declare(
+            self.channel_declared,
             queue=channel,
-            passive=passive,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
+
+    def channel_declared(self, method_frame):
+
+        self.resolve.set_result(None)
 
     # Receive.
 
@@ -627,14 +630,10 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def declare_channel(self, channel):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.declare_channel,
-                channel=channel,
-                passive=False,
-                callback=lambda method_frame: future.set_result(None),
-            ))
+        future = self.thread.schedule(
+            self.thread.amqp.declare_channel,
+            channel,
+        )
         return future.result()
 
     def group_add(self, group, channel):
