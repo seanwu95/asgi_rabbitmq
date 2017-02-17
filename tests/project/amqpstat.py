@@ -10,7 +10,6 @@ from functools import wraps
 from operator import itemgetter
 
 import asgi_rabbitmq
-from pika import SelectConnection
 from pika.channel import Channel
 from pika.connection import LOGGER
 from pika.spec import Basic
@@ -159,7 +158,7 @@ def wrap(method, callback):
     return wrapper
 
 
-class DebugConnection(SelectConnection):
+class DebugConnection(asgi_rabbitmq.core.AMQP.Connection):
     """Collect statistics about RabbitMQ methods usage on connection."""
 
     def _create_channel(self, channel_number, on_open_callback):
