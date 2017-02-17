@@ -46,6 +46,7 @@ class AMQP(object):
         self.channel_capacity = channel_capacity
         self.method_calls = method_calls
         self.channels = {}
+        self.futures = {}
 
     # Connection handling.
 
@@ -71,31 +72,52 @@ class AMQP(object):
     def check_method_call(self):
 
         try:
-            ident, method = self.method_calls.get_nowait()
-            self.process(ident, method)
+            ident, method, future = self.method_calls.get_nowait()
+            self.process(ident, method, future)
         except queue.Empty:
             pass
         self.connection.add_timeout(0.01, self.check_method_call)
 
-    def process(self, ident, method):
+    def process(self, ident, method, future):
 
-        if ident in self.channels:
-            amqp_channel = self.channels[ident]
-            if amqp_channel.is_open:
+        # FIXME: Remove after all layer methods will be ported to the
+        # new schedule mechanism.
+        if future is None:
+            if ident in self.channels:
+                amqp_channel = self.channels[ident]
+                if amqp_channel.is_open:
+                    method(amqp_channel=amqp_channel)
+                    return
+
+            def _old_register_channel(amqp_channel):
+                self.channels[ident] = amqp_channel
                 method(amqp_channel=amqp_channel)
-                return
-        self.connection.channel(
-            partial(
-                self.register_channel,
-                ident=ident,
-                method=method,
-            ))
 
-    def register_channel(self, amqp_channel, ident, method=None):
+            self.connection.channel(_old_register_channel)
+            return
+        # -----
+        if ident in self.channels and self.channels[ident].is_open:
+            self.futures[self.channels[ident]] = future
+            self.apply_with_context(ident, method)
+            return
+        self.connection.channel(
+            partial(self.register_channel, ident, method, future),
+        )
+
+    def register_channel(self, ident, method, future, amqp_channel):
 
         self.channels[ident] = amqp_channel
-        if method:
-            method(amqp_channel=amqp_channel)
+        self.futures[amqp_channel] = future
+        self.apply_with_context(ident, method)
+
+    def apply_with_context(self, ident, method):
+        try:
+            self.amqp_channel = self.channels[ident]
+            self.resolve = self.futures[self.amqp_channel]
+            method()
+        finally:
+            del self.amqp_channel
+            del self.resolve
 
     # Utilities.
 
@@ -107,6 +129,9 @@ class AMQP(object):
             return channel.rsplit('?', 1)[-1]
         else:
             return channel
+
+    # FIXME: remove this two decorators when transition to the new
+    # schedule mechanism will be finished.
 
     def propagate_error(method):
 
@@ -148,25 +173,38 @@ class AMQP(object):
 
     # Send.
 
-    @propagate_on_close
-    def send(self, amqp_channel, channel, message, resolve):
+    def send(self, channel, message):
 
         # FIXME: Avoid constant queue declaration.  Or at least try to
         # minimize its impact to system.
         queue = self.get_queue_name(channel)
-        publish_message = partial(
-            self.publish_message,
-            amqp_channel=amqp_channel,
-            channel=queue,
-            message=message,
-            resolve=resolve,
-        )
-        self.declare_channel(
-            amqp_channel=amqp_channel,
-            channel=queue,
+        self.amqp_channel.queue_declare(
+            partial(self.publish_message, channel, message, self.amqp_channel,
+                    self.resolve),
+            queue=queue,
             passive=True if '!' in channel or '?' in channel else False,
-            callback=publish_message,
+            arguments={'x-dead-letter-exchange': self.dead_letters},
         )
+
+    def publish_message(self, channel, message, amqp_channel, resolve,
+                        method_frame):
+
+        if method_frame.method.message_count >= self.capacity:
+            resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
+            return
+        queue = self.get_queue_name(channel)
+        body = self.serialize(message)
+        expiration = str(self.expiry * 1000)
+        properties = BasicProperties(expiration=expiration)
+        amqp_channel.basic_publish(
+            exchange='',
+            routing_key=queue,
+            body=body,
+            properties=properties,
+        )
+        resolve.set_result(None)
+
+    # Declare channel.
 
     def declare_channel(self, amqp_channel, channel, passive, callback):
 
@@ -176,23 +214,6 @@ class AMQP(object):
             passive=passive,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
-
-    @propagate_error
-    def publish_message(self, amqp_channel, channel, message, resolve,
-                        method_frame):
-
-        if method_frame.method.message_count >= self.capacity:
-            raise RabbitmqChannelLayer.ChannelFull
-        body = self.serialize(message)
-        expiration = str(self.expiry * 1000)
-        properties = BasicProperties(expiration=expiration)
-        amqp_channel.basic_publish(
-            exchange='',
-            routing_key=channel,
-            body=body,
-            properties=properties,
-        )
-        resolve.set_result(None)
 
     # Receive.
 
@@ -310,7 +331,7 @@ class AMQP(object):
             channels=channels,
             block=False,
             resolve=resolve,
-        )))
+        ), None))
 
     # New channel.
 
@@ -514,6 +535,14 @@ class ConnectionThread(Thread):
 
         self.amqp.run()
 
+    def schedule(self, f, *args, **kwargs):
+
+        future = Future()
+        self.calls.put(
+            (get_ident(), partial(f, *args, **kwargs), future),
+        )
+        return future
+
 
 class RabbitmqChannelLayer(BaseChannelLayer):
 
@@ -538,14 +567,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send(self, channel, message):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.send,
-                channel=channel,
-                message=message,
-                resolve=future,
-            ))
+        future = self.thread.schedule(self.thread.amqp.send, channel, message)
         return future.result()
 
     def receive(self, channels, block=False):
@@ -620,7 +642,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def schedule(self, f):
 
-        self.thread.calls.put((get_ident(), f))
+        self.thread.calls.put((get_ident(), f, None))
 
 
 # TODO: is it optimal to read bytes from content frame, call python
