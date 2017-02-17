@@ -1,3 +1,4 @@
+import weakref
 from functools import partial, wraps
 
 import msgpack
@@ -26,11 +27,37 @@ class PropagatedError(Exception):
     """Exception raised to show error from the connection thread."""
 
 
+class LayerSelectConnection(SelectConnection):
+
+    def __init__(self, *args, **kwargs):
+
+        self.amqp_ref = kwargs.pop('amqp_ref')
+        super(LayerSelectConnection, self).__init__(*args, **kwargs)
+
+    def _process_callbacks(self, frame_value):
+
+        amqp = self.amqp_ref()
+        try:
+            amqp.amqp_channel = amqp.channels.get(frame_value.channel_number)
+            amqp.resolve = amqp.futures.get(amqp.amqp_channel)
+            return super(LayerSelectConnection,
+                         self)._process_callbacks(frame_value)
+        finally:
+            try:
+                del amqp.amqp_channel
+            except AttributeError:
+                pass
+            try:
+                del amqp.resolve
+            except AttributeError:
+                pass
+
+
 class AMQP(object):
 
     dead_letters = 'dead-letters'
     Parameters = URLParameters
-    Connection = SelectConnection
+    Connection = LayerSelectConnection
 
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
                  method_calls):
@@ -39,6 +66,7 @@ class AMQP(object):
         self.connection = self.Connection(
             parameters=self.parameters,
             on_open_callback=self.on_connection_open,
+            amqp_ref=weakref.ref(self),
         )
         self.expiry = expiry
         self.group_expiry = group_expiry
@@ -183,30 +211,28 @@ class AMQP(object):
         # minimize its impact to system.
         queue = self.get_queue_name(channel)
         self.amqp_channel.queue_declare(
-            partial(self.publish_message, channel, message, self.amqp_channel,
-                    self.resolve),
+            partial(self.publish_message, channel, message),
             queue=queue,
             passive=True if '!' in channel or '?' in channel else False,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
-    def publish_message(self, channel, message, amqp_channel, resolve,
-                        method_frame):
+    def publish_message(self, channel, message, method_frame):
 
         if method_frame.method.message_count >= self.capacity:
-            resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
+            self.resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
             return
         queue = self.get_queue_name(channel)
         body = self.serialize(message)
         expiration = str(self.expiry * 1000)
         properties = BasicProperties(expiration=expiration)
-        amqp_channel.basic_publish(
+        self.amqp_channel.basic_publish(
             exchange='',
             routing_key=queue,
             body=body,
             properties=properties,
         )
-        resolve.set_result(None)
+        self.resolve.set_result(None)
 
     # Declare channel.
 
