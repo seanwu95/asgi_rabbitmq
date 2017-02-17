@@ -42,6 +42,11 @@ class LayerSelectConnection(SelectConnection):
             amqp.resolve = amqp.futures.get(amqp.amqp_channel)
             return super(LayerSelectConnection,
                          self)._process_callbacks(frame_value)
+        except Exception as error:
+            try:
+                amqp.resolve.set_exception(error)
+            except AttributeError:
+                pass
         finally:
             try:
                 del amqp.amqp_channel
@@ -147,6 +152,8 @@ class AMQP(object):
             self.amqp_channel = self.channels[self.numbers[ident]]
             self.resolve = self.futures[self.amqp_channel]
             method()
+        except Exception as error:
+            self.resolve.set_exception(error)
         finally:
             del self.amqp_channel
             del self.resolve
