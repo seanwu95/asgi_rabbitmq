@@ -378,50 +378,52 @@ class AMQP(object):
 
     # Groups.
 
-    @propagate_error
-    @propagate_on_close
-    def group_add(self, amqp_channel, group, channel, resolve):
+    def group_add(self, group, channel):
 
         # FIXME: Is it possible to do this things in parallel?
-        self.expire_group_member(amqp_channel, group, channel)
-        declare_group = partial(
-            amqp_channel.exchange_declare,
+        self.expire_group_member(group, channel)
+
+        def after_bind(method_frame):
+
+            self.resolve.set_result(None)
+
+        def bind_channel(method_frame):
+
+            self.amqp_channel.queue_bind(
+                after_bind,
+                queue=self.get_queue_name(channel),
+                exchange=channel,
+            )
+
+        def bind_group(method_frame):
+
+            self.amqp_channel.exchange_bind(
+                bind_channel,
+                destination=channel,
+                source=group,
+            )
+
+        def declare_channel(method_frame):
+            if '!' in channel or '?' in channel:
+                bind_group(None)
+            else:
+                self.amqp_channel.queue_declare(
+                    bind_group,
+                    queue=channel,
+                    arguments={'x-dead-letter-exchange': self.dead_letters},
+                )
+
+        def declare_member(method_frame):
+            self.amqp_channel.exchange_declare(
+                declare_channel,
+                exchange=channel,
+                exchange_type='fanout',
+            )
+
+        self.amqp_channel.exchange_declare(
+            declare_member,
             exchange=group,
             exchange_type='fanout',
-        )
-        declare_member = partial(
-            amqp_channel.exchange_declare,
-            exchange=channel,
-            exchange_type='fanout',
-        )
-        if '!' in channel or '?' in channel:
-            declare_channel = lambda callback: callback(method_frame=None)
-        else:
-            declare_channel = partial(
-                amqp_channel.queue_declare,
-                queue=channel,
-                arguments={'x-dead-letter-exchange': self.dead_letters},
-            )
-        bind_group = partial(
-            amqp_channel.exchange_bind,
-            destination=channel,
-            source=group,
-        )
-        bind_channel = partial(
-            amqp_channel.queue_bind,
-            queue=self.get_queue_name(channel),
-            exchange=channel,
-        )
-        declare_group(
-            lambda method_frame: declare_member(
-                lambda method_frame: declare_channel(
-                    lambda method_frame: bind_group(
-                        lambda method_frame: bind_channel(
-                            lambda method_frame: resolve.set_result(None),
-                        ),
-                    ),
-                ),
-            ),
         )
 
     @propagate_error
@@ -446,35 +448,36 @@ class AMQP(object):
 
     # Dead letters processing.
 
-    def expire_group_member(self, amqp_channel, group, channel):
+    def expire_group_member(self, group, channel):
 
-        expire_marker = 'expire.bind.%s.%s' % (group,
-                                               self.get_queue_name(channel))
         ttl = self.group_expiry * 1000
-
-        declare_marker = partial(
-            amqp_channel.queue_declare,
-            queue=expire_marker,
+        self.amqp_channel.queue_declare(
+            partial(self.push_marker, group, channel),
+            queue=self.get_expire_marker(group, channel),
             arguments={
                 'x-dead-letter-exchange': self.dead_letters,
                 'x-message-ttl': ttl,
                 # FIXME: make this delay as little as possible.
                 'x-expires': ttl + 500,
                 'x-max-length': 1,
-            })
+            },
+        )
 
-        def push_marker(method_frame):
-            body = self.serialize({
-                'group': group,
-                'channel': channel,
-            })
-            amqp_channel.basic_publish(
-                exchange='',
-                routing_key=expire_marker,
-                body=body,
-            )
+    def push_marker(self, group, channel, method_frame):
 
-        declare_marker(push_marker)
+        body = self.serialize({
+            'group': group,
+            'channel': channel,
+        })
+        self.amqp_channel.basic_publish(
+            exchange='',
+            routing_key=self.get_expire_marker(group, channel),
+            body=body,
+        )
+
+    def get_expire_marker(self, group, channel):
+
+        return 'expire.bind.%s.%s' % (group, self.get_queue_name(channel))
 
     def declare_dead_letters(self, amqp_channel):
 
@@ -638,14 +641,11 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_add(self, group, channel):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.group_add,
-                group=group,
-                channel=channel,
-                resolve=future,
-            ))
+        future = self.thread.schedule(
+            self.thread.amqp.group_add,
+            group,
+            channel,
+        )
         return future.result()
 
     def group_discard(self, group, channel):
