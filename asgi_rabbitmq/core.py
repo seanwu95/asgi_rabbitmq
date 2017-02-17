@@ -46,6 +46,7 @@ class AMQP(object):
         self.channel_capacity = channel_capacity
         self.method_calls = method_calls
         self.channels = {}
+        self.numbers = {}
         self.futures = {}
 
     # Connection handling.
@@ -83,21 +84,23 @@ class AMQP(object):
         # FIXME: Remove after all layer methods will be ported to the
         # new schedule mechanism.
         if future is None:
-            if ident in self.channels:
-                amqp_channel = self.channels[ident]
+            if ident in self.numbers:
+                amqp_channel = self.channels[self.numbers[ident]]
                 if amqp_channel.is_open:
                     method(amqp_channel=amqp_channel)
                     return
 
             def _old_register_channel(amqp_channel):
-                self.channels[ident] = amqp_channel
+                self.numbers[ident] = amqp_channel.channel_number
+                self.channels[amqp_channel.channel_number] = amqp_channel
                 method(amqp_channel=amqp_channel)
 
             self.connection.channel(_old_register_channel)
             return
         # -----
-        if ident in self.channels and self.channels[ident].is_open:
-            self.futures[self.channels[ident]] = future
+        if (ident in self.numbers and
+                self.channels[self.numbers[ident]].is_open):
+            self.futures[self.channels[self.numbers[ident]]] = future
             self.apply_with_context(ident, method)
             return
         self.connection.channel(
@@ -106,13 +109,14 @@ class AMQP(object):
 
     def register_channel(self, ident, method, future, amqp_channel):
 
-        self.channels[ident] = amqp_channel
+        self.numbers[ident] = amqp_channel.channel_number
+        self.channels[amqp_channel.channel_number] = amqp_channel
         self.futures[amqp_channel] = future
         self.apply_with_context(ident, method)
 
     def apply_with_context(self, ident, method):
         try:
-            self.amqp_channel = self.channels[ident]
+            self.amqp_channel = self.channels[self.numbers[ident]]
             self.resolve = self.futures[self.amqp_channel]
             method()
         finally:
