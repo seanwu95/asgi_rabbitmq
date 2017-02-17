@@ -433,12 +433,10 @@ class AMQP(object):
             exchange_type='fanout',
         )
 
-    @propagate_error
-    @propagate_on_close
-    def group_discard(self, amqp_channel, group, channel, resolve):
+    def group_discard(self, group, channel):
 
-        amqp_channel.exchange_unbind(
-            lambda method_frame: resolve.set_result(None),
+        self.amqp_channel.exchange_unbind(
+            lambda method_frame: self.resolve.set_result(None),
             destination=channel,
             source=group,
         )
@@ -657,14 +655,11 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_discard(self, group, channel):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.group_discard,
-                group=group,
-                channel=channel,
-                resolve=future,
-            ))
+        future = self.thread.schedule(
+            self.thread.amqp.group_discard,
+            group,
+            channel,
+        )
         return future.result()
 
     def send_group(self, group, message):
