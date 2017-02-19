@@ -475,11 +475,11 @@ class AMQP(object):
             source=group,
         )
 
-    def send_group(self, amqp_channel, group, message):
+    def send_group(self, group, message):
 
         # FIXME: What about expiration property here?
         body = self.serialize(message)
-        amqp_channel.basic_publish(
+        self.amqp_channel.basic_publish(
             exchange=group,
             routing_key='',
             body=body,
@@ -698,12 +698,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send_group(self, group, message):
 
-        self.schedule(
-            partial(
-                self.thread.amqp.send_group,
-                group=group,
-                message=message,
-            ))
+        self.thread.schedule(self.thread.amqp.send_group, group, message)
 
     def schedule(self, f):
 
