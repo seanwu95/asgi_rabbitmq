@@ -433,7 +433,6 @@ class AMQP(object):
 
     def on_dead_letter_channel_close(self, amqp_channel, code, msg):
 
-        # FIXME: Check if error is recoverable.
         self.process(None, self.on_dead_letter_channel_open, Future())
 
     def expire_group_member(self, group, channel):
