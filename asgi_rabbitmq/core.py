@@ -409,12 +409,12 @@ class AMQP(object):
 
     # New channel.
 
-    @propagate_error
-    @propagate_on_close
-    def new_channel(self, amqp_channel, resolve):
+    def new_channel(self):
 
-        amqp_channel.queue_declare(
-            lambda method_frame: resolve.set_result(method_frame.method.queue),
+        self.amqp_channel.queue_declare(
+            lambda method_frame: self.resolve.set_result(
+                method_frame.method.queue,
+            ),
         )
 
     # Groups.
@@ -661,11 +661,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
-        future = Future()
-        self.schedule(partial(
-            self.thread.amqp.new_channel,
-            resolve=future,
-        ))
+        future = self.thread.schedule(self.thread.amqp.new_channel)
         queue_name = future.result()
         channel = pattern + queue_name
         return channel
