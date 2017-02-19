@@ -252,3 +252,24 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         channel, message = self.channel_layer.receive(['me_test'])
         self.assertIs(channel, None)
         self.assertIs(message, None)
+
+    def test_group_add_is_idempotent(self):
+        """
+        Calling group_add continuously should set system into the right
+        state.
+        """
+
+        self.channel_layer.group_add('gr_test', 'ch_test')
+        self.channel_layer.thread.schedule(
+            self.channel_layer.thread.amqp.expire_group_member,
+            'gr_test',
+            'ch_test',
+        )
+        time.sleep(0.1)
+        # NOTE: Implementation detail.  Dead letters consumer should
+        # ignore messages died with maxlen reason.  This messages
+        # caused by sequential group_add calls.
+        self.channel_layer.send_group('gr_test', {'value': 'blue'})
+        channel, message = self.channel_layer.receive(['ch_test'])
+        assert channel == 'ch_test'
+        assert message == {'value': 'blue'}

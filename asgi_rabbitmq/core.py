@@ -504,15 +504,15 @@ class AMQP(object):
     def on_dead_letter(self, amqp_channel, method_frame, properties, body):
 
         amqp_channel.basic_ack(method_frame.delivery_tag)
-        # FIXME: Ignore max-length dead-letters.
         # FIXME: what the hell zero means here?
         queue = properties.headers['x-death'][0]['queue']
-        if self.is_expire_marker(queue):
+        reason = properties.headers['x-death'][0]['reason']
+        if self.is_expire_marker(queue) and reason == 'expired':
             message = self.deserialize(body)
             group = message['group']
             channel = message['channel']
             self.group_discard(group, channel)
-        else:
+        elif not self.is_expire_marker(queue):
             amqp_channel.exchange_delete(exchange=queue)
 
     def is_expire_marker(self, queue):
