@@ -134,18 +134,8 @@ class AMQP(object):
 
     def on_connection_open(self, connection):
 
-        connection.channel(self.on_channel_open)
+        self.process(None, self.on_dead_letter_channel_open, Future())
         self.check_method_call()
-
-    def on_channel_open(self, amqp_channel):
-
-        amqp_channel.add_on_close_callback(self.on_channel_close)
-        self.declare_dead_letters(amqp_channel)
-
-    def on_channel_close(self, amqp_channel, code, msg):
-
-        # FIXME: Check if error is recoverable.
-        amqp_channel.connection.channel(self.on_channel_open)
 
     def check_method_call(self):
 
@@ -497,6 +487,16 @@ class AMQP(object):
 
     # Dead letters processing.
 
+    def on_dead_letter_channel_open(self):
+
+        self.amqp_channel.add_on_close_callback(self.on_channel_close)
+        self.declare_dead_letters()
+
+    def on_dead_letter_channel_close(self, amqp_channel, code, msg):
+
+        # FIXME: Check if error is recoverable.
+        self.process(None, self.on_dead_letter_channel_open, Future())
+
     def expire_group_member(self, group, channel):
 
         ttl = self.group_expiry * 1000
@@ -528,39 +528,34 @@ class AMQP(object):
 
         return 'expire.bind.%s.%s' % (group, self.get_queue_name(channel))
 
-    def declare_dead_letters(self, amqp_channel):
+    def declare_dead_letters(self):
 
-        declare_exchange = partial(
-            amqp_channel.exchange_declare,
+        def consume(method_frame):
+
+            self.amqp_channel.basic_consume(
+                self.on_dead_letter,
+                queue=self.dead_letters,
+            )
+
+        def do_bind(method_frame):
+
+            self.amqp_channel.queue_bind(
+                consume,
+                queue=self.dead_letters,
+                exchange=self.dead_letters,
+            )
+
+        def declare_queue(method_frame):
+
+            self.amqp_channel.queue_declare(
+                do_bind,
+                queue=self.dead_letters,
+            )
+
+        self.amqp_channel.exchange_declare(
+            declare_queue,
             exchange=self.dead_letters,
             exchange_type='fanout',
-        )
-        declare_queue = partial(
-            amqp_channel.queue_declare,
-            queue=self.dead_letters,
-        )
-        do_bind = partial(
-            amqp_channel.queue_bind,
-            queue=self.dead_letters,
-            exchange=self.dead_letters,
-        )
-        consume = partial(
-            self.consume_from_dead_letters,
-            amqp_channel=amqp_channel,
-        )
-        declare_exchange(
-            lambda method_frame: declare_queue(
-                lambda method_frame: do_bind(
-                    lambda method_frame: consume(),
-                ),
-            ),
-        )
-
-    def consume_from_dead_letters(self, amqp_channel):
-
-        amqp_channel.basic_consume(
-            self.on_dead_letter,
-            queue=self.dead_letters,
         )
 
     def on_dead_letter(self, amqp_channel, method_frame, properties, body):
@@ -573,12 +568,7 @@ class AMQP(object):
             message = self.deserialize(body)
             group = message['group']
             channel = message['channel']
-            self.group_discard(
-                amqp_channel=amqp_channel,
-                group=group,
-                channel=channel,
-                resolve=Future(),
-            )
+            self.group_discard(group, channel)
         else:
             amqp_channel.exchange_delete(exchange=queue)
 
