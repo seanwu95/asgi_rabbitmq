@@ -59,6 +59,33 @@ class LayerAMQPChannel(AMQPChannel):
             except AttributeError:
                 pass
 
+    def _on_getok(self, method_frame, header_frame, body):
+
+        # TODO: Refactor to the context manager.
+        amqp = self.amqp_ref()
+        try:
+            amqp.amqp_channel = amqp.channels.get(method_frame.channel_number)
+            amqp.resolve = amqp.futures.get(amqp.amqp_channel)
+            return super(LayerAMQPChannel, self)._on_getok(
+                method_frame,
+                header_frame,
+                body,
+            )
+        except Exception as error:
+            try:
+                amqp.resolve.set_exception(error)
+            except AttributeError:
+                pass
+        finally:
+            try:
+                del amqp.amqp_channel
+            except AttributeError:
+                pass
+            try:
+                del amqp.resolve
+            except AttributeError:
+                pass
+
 
 class LayerSelectConnection(SelectConnection):
 
@@ -80,6 +107,7 @@ class LayerSelectConnection(SelectConnection):
 
     def _process_callbacks(self, frame_value):
 
+        # TODO: Refactor to the context manager.
         amqp = self.amqp_ref()
         try:
             amqp.amqp_channel = amqp.channels.get(frame_value.channel_number)
