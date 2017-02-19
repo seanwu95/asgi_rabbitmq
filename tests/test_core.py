@@ -241,3 +241,14 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         channel, message = self.channel_layer.receive(['foo'], block=True)
         assert channel == 'foo'
         assert message == {'bar': 'baz'}
+
+    def test_send_group_message_expiry(self):
+        """
+        Tests that messages expire correctly when it was sent to group.
+        """
+        self.channel_layer.group_add('gr_test', 'me_test')
+        self.channel_layer.send_group('gr_test', {'value': 'blue'})
+        time.sleep(self.expiry_delay)
+        channel, message = self.channel_layer.receive(['me_test'])
+        self.assertIs(channel, None)
+        self.assertIs(message, None)

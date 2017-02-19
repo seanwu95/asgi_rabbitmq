@@ -231,15 +231,20 @@ class AMQP(object):
             return
         queue = self.get_queue_name(channel)
         body = self.serialize(message)
-        expiration = str(self.expiry * 1000)
-        properties = BasicProperties(expiration=expiration)
         self.amqp_channel.basic_publish(
             exchange='',
             routing_key=queue,
             body=body,
-            properties=properties,
+            properties=self.publish_properties,
         )
         self.resolve.set_result(None)
+
+    @property
+    def publish_properties(self):
+
+        expiration = str(self.expiry * 1000)
+        properties = BasicProperties(expiration=expiration)
+        return properties
 
     # Declare channel.
 
@@ -414,12 +419,12 @@ class AMQP(object):
 
     def send_group(self, group, message):
 
-        # FIXME: What about expiration property here?
         body = self.serialize(message)
         self.amqp_channel.basic_publish(
             exchange=group,
             routing_key='',
             body=body,
+            properties=self.publish_properties,
         )
 
     # Dead letters processing.
