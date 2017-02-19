@@ -41,7 +41,7 @@ def monkeypatch_all():
 
 def monkeypatch_connection():
 
-    asgi_rabbitmq.core.AMQP.Connection = DebugConnection
+    asgi_rabbitmq.core.AMQP.Connection.Channel = DebugChannel
 
 
 def monkeypatch_layer():
@@ -158,16 +158,7 @@ def wrap(method, callback):
     return wrapper
 
 
-class DebugConnection(asgi_rabbitmq.core.AMQP.Connection):
-    """Collect statistics about RabbitMQ methods usage on connection."""
-
-    def _create_channel(self, channel_number, on_open_callback):
-
-        LOGGER.debug('Creating channel %s', channel_number)
-        return DebugChannel(self, channel_number, on_open_callback)
-
-
-class DebugChannel(Channel):
+class DebugChannel(asgi_rabbitmq.core.AMQP.Connection.Channel):
     """Collect statistics about RabbitMQ methods usage on channel."""
 
     def basic_ack(self, *args, **kwargs):

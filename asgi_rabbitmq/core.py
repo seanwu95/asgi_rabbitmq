@@ -5,6 +5,7 @@ import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
+from pika.channel import Channel as AMQPChannel
 from pika.spec import Basic, BasicProperties
 
 try:
@@ -27,12 +28,55 @@ class PropagatedError(Exception):
     """Exception raised to show error from the connection thread."""
 
 
+class LayerAMQPChannel(AMQPChannel):
+
+    def __init__(self, *args, **kwargs):
+
+        self.amqp_ref = kwargs.pop('amqp_ref')
+        super(LayerAMQPChannel, self).__init__(*args, **kwargs)
+
+    def _on_deliver(self, method_frame, header_frame, body):
+
+        # TODO: Refactor to the context manager.
+        amqp = self.amqp_ref()
+        try:
+            amqp.amqp_channel = amqp.channels.get(method_frame.channel_number)
+            amqp.resolve = amqp.futures.get(amqp.amqp_channel)
+            return super(LayerAMQPChannel, self)._on_deliver(
+                method_frame, header_frame, body)
+        except Exception as error:
+            try:
+                amqp.resolve.set_exception(error)
+            except AttributeError:
+                pass
+        finally:
+            try:
+                del amqp.amqp_channel
+            except AttributeError:
+                pass
+            try:
+                del amqp.resolve
+            except AttributeError:
+                pass
+
+
 class LayerSelectConnection(SelectConnection):
+
+    Channel = LayerAMQPChannel
 
     def __init__(self, *args, **kwargs):
 
         self.amqp_ref = kwargs.pop('amqp_ref')
         super(LayerSelectConnection, self).__init__(*args, **kwargs)
+
+    def _create_channel(self, channel_number, on_open_callback):
+
+        return self.Channel(
+            self,
+            channel_number,
+            on_open_callback,
+            amqp_ref=self.amqp_ref,
+        )
 
     def _process_callbacks(self, frame_value):
 
