@@ -1,5 +1,5 @@
 import weakref
-from functools import partial, wraps
+from functools import partial
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
@@ -22,10 +22,6 @@ try:
     import queue
 except ImportError:
     import Queue as queue
-
-
-class PropagatedError(Exception):
-    """Exception raised to show error from the connection thread."""
 
 
 class LayerAMQPChannel(AMQPChannel):
@@ -176,23 +172,6 @@ class AMQP(object):
 
     def process(self, ident, method, future):
 
-        # FIXME: Remove after all layer methods will be ported to the
-        # new schedule mechanism.
-        if future is None:
-            if ident in self.numbers:
-                amqp_channel = self.channels[self.numbers[ident]]
-                if amqp_channel.is_open:
-                    method(amqp_channel=amqp_channel)
-                    return
-
-            def _old_register_channel(amqp_channel):
-                self.numbers[ident] = amqp_channel.channel_number
-                self.channels[amqp_channel.channel_number] = amqp_channel
-                method(amqp_channel=amqp_channel)
-
-            self.connection.channel(_old_register_channel)
-            return
-        # -----
         if (ident in self.numbers and
                 self.channels[self.numbers[ident]].is_open):
             self.futures[self.channels[self.numbers[ident]]] = future
@@ -230,47 +209,6 @@ class AMQP(object):
             return channel.rsplit('?', 1)[-1]
         else:
             return channel
-
-    # FIXME: remove this two decorators when transition to the new
-    # schedule mechanism will be finished.
-
-    def propagate_error(method):
-
-        @wraps(method)
-        def method_wrapper(self, **kwargs):
-
-            try:
-                method(self, **kwargs)
-            except Exception as error:
-                kwargs['resolve'].set_exception(error)
-
-        return method_wrapper
-
-    def propagate_on_close(method):
-
-        @wraps(method)
-        def method_wrapper(self, **kwargs):
-
-            amqp_channel = kwargs['amqp_channel']
-            resolve = kwargs['resolve']
-            custom_handler = method(self, **kwargs)
-
-            def onerror(channel, code, msg):
-                if custom_handler:
-                    custom_handler(channel, code, msg)
-                else:
-                    resolve.set_exception(PropagatedError(code, msg))
-
-            resolve.add_done_callback(
-                partial(
-                    amqp_channel.callbacks.remove,
-                    amqp_channel.channel_number,
-                    '_on_channel_close',
-                    onerror,
-                ))
-            amqp_channel.add_on_close_callback(onerror)
-
-        return method_wrapper
 
     # Send.
 
@@ -319,64 +257,37 @@ class AMQP(object):
 
     # Receive.
 
-    @propagate_error
-    @propagate_on_close
-    def receive(self, amqp_channel, channels, block, resolve):
+    def receive(self, channels, block):
 
         if block:
             consumer_tags = {}
-            callback = partial(
-                self.consume_message,
-                consumer_tags=consumer_tags,
-                resolve=resolve,
-            )
             for channel in channels:
-                tag = amqp_channel.basic_consume(
-                    lambda amqp_channel,
-                    method_frame,
-                    properties,
-                    body: callback(
-                        amqp_channel=amqp_channel,
-                        method_frame=method_frame,
-                        properties=properties,
-                        body=body,
-                    ),
+                tag = self.amqp_channel.basic_consume(
+                    partial(self.consume_message, consumer_tags),
                     queue=self.get_queue_name(channel),
                 )
                 consumer_tags[tag] = channel
         else:
             if not channels:
                 # All channels gave 404 error.
-                resolve.set_result((None, None))
+                self.resolve.set_result((None, None))
                 return
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel = channels[0]
-            get_empty_callback = lambda method_frame: self.no_message(
-                method_frame=method_frame,
-                amqp_channel=amqp_channel,
-                channels=channels[1:],
-                resolve=resolve)
-            amqp_channel.add_callback(
-                replies=[Basic.GetEmpty],
-                callback=get_empty_callback,
+            no_message = partial(self.no_message, channels[1:])
+            self.amqp_channel.add_callback(no_message, [Basic.GetEmpty])
+            no_queue = partial(self.no_queue, channels[1:])
+            self.amqp_channel.add_on_close_callback(no_queue)
+            self.resolve.add_done_callback(
+                lambda future: self.amqp_channel.callbacks.remove(
+                    self.amqp_channel.channel_number,
+                    '_on_channel_close',
+                    no_queue,
+                ),
             )
-            amqp_channel.basic_get(
+            self.amqp_channel.basic_get(
+                partial(self.get_message, channel, no_message),
                 queue=self.get_queue_name(channel),
-                callback=lambda amqp_channel, method_frame, properties, body: (
-                    self.get_message(
-                        amqp_channel=amqp_channel,
-                        method_frame=method_frame,
-                        properties=properties,
-                        body=body,
-                        channel=channel,
-                        resolve=resolve,
-                        get_empty_callback=get_empty_callback)))
-            return lambda amqp_channel, code, msg: self.no_queue(
-                amqp_channel=amqp_channel,
-                code=code,
-                msg=msg,
-                channels=channels[1:],
-                resolve=resolve,
             )
 
     # FIXME: If we tries to consume from list of channels.  One of
@@ -388,52 +299,50 @@ class AMQP(object):
     # exist at this time.  We consume with blocking == True.  We must
     # start consuming at the moment when queue were declared.
 
-    @propagate_error
-    def consume_message(self, amqp_channel, method_frame, properties, body,
-                        consumer_tags, resolve):
+    def consume_message(self, consumer_tags, amqp_channel, method_frame,
+                        properties, body):
 
         amqp_channel.basic_ack(method_frame.delivery_tag)
         for tag in consumer_tags:
             amqp_channel.basic_cancel(consumer_tag=tag)
         channel = consumer_tags[method_frame.consumer_tag]
         message = self.deserialize(body)
-        resolve.set_result((channel, message))
+        self.resolve.set_result((channel, message))
 
-    @propagate_error
-    def get_message(self, amqp_channel, method_frame, properties, body,
-                    channel, resolve, get_empty_callback):
+    def get_message(self, channel, no_message, amqp_channel, method_frame,
+                    properties, body):
 
         amqp_channel.callbacks.remove(
             amqp_channel.channel_number,
             Basic.GetEmpty,
-            get_empty_callback,
+            no_message,
         )
         amqp_channel.basic_ack(method_frame.delivery_tag)
         message = self.deserialize(body)
-        resolve.set_result((channel, message))
+        self.resolve.set_result((channel, message))
 
-    @propagate_error
-    def no_message(self, amqp_channel, method_frame, channels, resolve):
+    def no_message(self, channels, method_frame):
 
         if channels:
             self.receive(
-                amqp_channel=amqp_channel,
                 channels=channels,
                 block=False,
-                resolve=resolve,
             )
         else:
-            resolve.set_result((None, None))
+            self.resolve.set_result((None, None))
 
-    @propagate_error
-    def no_queue(self, amqp_channel, code, msg, channels, resolve):
+    def no_queue(self, channels, amqp_channel, code, msg):
 
-        self.method_calls.put((resolve.ident, partial(
-            self.receive,
-            channels=channels,
-            block=False,
-            resolve=resolve,
-        ), None))
+        idents = {v: k for k, v in self.numbers.items()}
+        ident = idents[amqp_channel.channel_number]
+        del self.channels[amqp_channel.channel_number]
+        del self.numbers[ident]
+        del self.futures[amqp_channel]
+        self.process(
+            ident,
+            partial(self.receive, channels, block=False),
+            self.resolve,
+        )
 
     # New channel.
 
@@ -615,9 +524,6 @@ class AMQP(object):
 
         return msgpack.unpackb(message, encoding='utf8')
 
-    del propagate_error
-    del propagate_on_close
-
 
 class ConnectionThread(Thread):
     """
@@ -675,15 +581,11 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def receive(self, channels, block=False):
 
-        future = Future()
-        future.ident = get_ident()
-        self.schedule(
-            partial(
-                self.thread.amqp.receive,
-                channels=channels,
-                block=block,
-                resolve=future,
-            ))
+        future = self.thread.schedule(
+            self.thread.amqp.receive,
+            channels,
+            block,
+        )
         return future.result()
 
     def new_channel(self, pattern):
@@ -724,17 +626,10 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         self.thread.schedule(self.thread.amqp.send_group, group, message)
 
-    def schedule(self, f):
-
-        self.thread.calls.put((get_ident(), f, None))
-
 
 # TODO: is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with
 # msgpack?  We should minimize useless work on message receive.
-#
-# FIXME: `retry_if_closed` and `propagate_error` not works with nested
-# callbacks.
 
 
 def worker_start_hook(sender, **kwargs):
