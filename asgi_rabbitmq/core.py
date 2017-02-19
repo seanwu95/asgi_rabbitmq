@@ -426,7 +426,9 @@ class AMQP(object):
 
     def on_dead_letter_channel_open(self):
 
-        self.amqp_channel.add_on_close_callback(self.on_channel_close)
+        self.amqp_channel.add_on_close_callback(
+            self.on_dead_letter_channel_close,
+        )
         self.declare_dead_letters()
 
     def on_dead_letter_channel_close(self, amqp_channel, code, msg):
