@@ -1,6 +1,7 @@
 import multiprocessing
 
 import benchmark
+import logutil
 import requests
 import websocket
 from twisted.internet import reactor
@@ -38,6 +39,7 @@ def test_benchmark(asgi_server):
 
 def run_benchmark(asgi_server):
 
+    logutil.setup_logger('Benchmark')
     benchmarker = benchmark.Benchmarker(
         url='ws://%s:%d' % asgi_server,
         num=100,
