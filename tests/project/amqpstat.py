@@ -10,8 +10,6 @@ from functools import wraps
 from operator import itemgetter
 
 import asgi_rabbitmq
-from pika.channel import Channel
-from pika.connection import LOGGER
 from pika.spec import Basic
 from tabulate import tabulate
 
