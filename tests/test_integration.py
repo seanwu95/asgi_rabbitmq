@@ -30,6 +30,8 @@ def test_benchmark(asgi_server):
     proc = multiprocessing.Process(target=run_benchmark, args=(asgi_server,))
     proc.daemon = True
     proc.start()
+    proc.join(timeout=90)
+    proc.terminate()
     proc.join()
     assert proc.exitcode == 0
 
