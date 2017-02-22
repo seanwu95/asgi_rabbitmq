@@ -275,6 +275,23 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         assert channel == 'ch_test'
         assert message == {'value': 'blue'}
 
+    def test_connection_on_close_notify_futures(self):
+        """
+        If connection in the connection thread was closed for some reason
+        we should notify waiting thread about this error.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.amqp.futures:
+            time.sleep(0.5)
+        # Get dead letters future.
+        amqp = self.channel_layer.thread.amqp
+        future = amqp.futures[amqp.channels[amqp.numbers[None]]]
+        # Look into on_close_callback.
+        self.channel_layer.thread.amqp.connection.close()
+        with pytest.raises(ConnectionClosed):
+            future.result()
+
     def test_resolve_callbacks_during_connection_close(self):
         """
         Connection can be in closing state.  If during this little time

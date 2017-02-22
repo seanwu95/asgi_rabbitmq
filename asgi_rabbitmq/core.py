@@ -91,7 +91,18 @@ class LayerSelectConnection(SelectConnection):
     def __init__(self, *args, **kwargs):
 
         self.amqp_ref = kwargs.pop('amqp_ref')
+        kwargs['on_close_callback'] = self.notify_futures
+        kwargs['stop_ioloop_on_close'] = False
         super(LayerSelectConnection, self).__init__(*args, **kwargs)
+
+    def notify_futures(self, connection, code, msg):
+
+        try:
+            amqp = self.amqp_ref()
+            for future in amqp.futures.values():
+                future.set_exception(ConnectionClosed())
+        finally:
+            self.ioloop.stop()
 
     def _create_channel(self, channel_number, on_open_callback):
 
