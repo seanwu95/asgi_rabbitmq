@@ -57,6 +57,9 @@ services:
     <<: *py35
     image: asgirabbitmq_py35
     command: /code/.tox3.5.2/py35-django110/bin/daphne demo.asgi:channel_layer -e tcp:port=8000:interface=0.0.0.0
+    # <<: *py27
+    # image: asgirabbitmq_py27
+    # command: /code/.tox2.7.13/py27-django110/bin/daphne demo.asgi:channel_layer -e tcp:port=8000:interface=0.0.0.0
     environment:
       PYTHONPATH: /code/tests/project
       DJANGO_SETTINGS_MODULE: demo.settings_benchmark
@@ -64,6 +67,9 @@ services:
     <<: *py35
     image: asgirabbitmq_py35
     command: /code/.tox3.5.2/py35-django110/bin/django-admin runworker
+    # <<: *py27
+    # image: asgirabbitmq_py27
+    # command: /code/.tox2.7.13/py27-django110/bin/django-admin runworker
     environment:
       PYTHONPATH: /code/tests/project
       DJANGO_SETTINGS_MODULE: demo.settings_benchmark
@@ -71,6 +77,9 @@ services:
     <<: *py35
     image: asgirabbitmq_py35
     command: /code/.tox3.5.2/py35-django110/bin/python /code/.tox3.5.2/py35-django110/lib/python3.5/site-packages/benchmark.py ws://daphne:8000
+    # <<: *py27
+    # image: asgirabbitmq_py27
+    # command: /code/.tox2.7.13/py27-django110/bin/python /code/.tox2.7.13/py27-django110/lib/python2.7/site-packages/benchmark.py ws://daphne:8000
     depends_on:
       - daphne
       - worker
