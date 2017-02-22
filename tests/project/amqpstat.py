@@ -17,7 +17,7 @@ amqp_stats = {}
 layer_stats = {}
 consumers = {}
 
-BENCHMARK = 'BENCHMARK' in os.environ
+BENCHMARK = os.environ.get('BENCHMARK', 'False') == 'True'
 
 
 def maybe_monkeypatch():
