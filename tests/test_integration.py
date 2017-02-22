@@ -1,10 +1,10 @@
-import multiprocessing
+import subprocess
+import sys
+import time
 
 import benchmark
-import logutil
 import requests
 import websocket
-from twisted.internet import reactor
 
 
 def test_http_request(asgi_server):
@@ -28,25 +28,16 @@ def test_websocket_message(asgi_server):
 
 def test_benchmark(asgi_server):
 
-    proc = multiprocessing.Process(target=run_benchmark, args=(asgi_server,))
-    proc.daemon = True
-    proc.start()
-    proc.join(timeout=90)
-    proc.terminate()
-    proc.join()
-    assert proc.exitcode == 0
-
-
-def run_benchmark(asgi_server):
-
-    logutil.setup_logger('Benchmark')
-    benchmarker = benchmark.Benchmarker(
-        url='ws://%s:%d' % asgi_server,
-        num=100,
-        concurrency=10,
-        rate=1,
-        messages=5,
-        spawn=30,
-    )
-    benchmarker.loop()
-    reactor.run(installSignalHandlers=False)
+    proc = subprocess.Popen([
+        sys.executable,
+        benchmark.__file__,
+        'ws://%s:%d' % asgi_server,
+    ])
+    for _ in range(0, 90, 5):
+        time.sleep(5)
+        if proc.returncode:
+            break
+    else:
+        proc.terminate()
+        proc.wait()
+    assert proc.returncode == 0
