@@ -4,7 +4,7 @@ services:
     image: rabbitmq:management
     ports:
       - "15672:15672"
-  py27:
+  py27: &py27
     build:
       context: .
       dockerfile: compose/py27
@@ -16,7 +16,7 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py27-django18,py27-django19,py27-django110
-  py34:
+  py34: &py34
     build:
       context: .
       dockerfile: compose/py34
@@ -28,7 +28,7 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py34-django18,py34-django19,py34-django110
-  py35:
+  py35: &py35
     build:
       context: .
       dockerfile: compose/py35
@@ -53,3 +53,24 @@ services:
       PYTHONPATH: /code/.tox3.5.2/py35-django110/lib/python3.5/site-packages
     ports:
       - "8889:8889"
+  daphne:
+    <<: *py35
+    image: asgirabbitmq_py35
+    command: /code/.tox3.5.2/py35-django110/bin/daphne demo.asgi:channel_layer -e tcp:port=8000:interface=0.0.0.0
+    environment:
+      PYTHONPATH: /code/tests/project
+      DJANGO_SETTINGS_MODULE: demo.settings_benchmark
+  worker:
+    <<: *py35
+    image: asgirabbitmq_py35
+    command: /code/.tox3.5.2/py35-django110/bin/django-admin runworker
+    environment:
+      PYTHONPATH: /code/tests/project
+      DJANGO_SETTINGS_MODULE: demo.settings_benchmark
+  benchmark:
+    <<: *py35
+    image: asgirabbitmq_py35
+    command: /code/.tox3.5.2/py35-django110/bin/python /code/.tox3.5.2/py35-django110/lib/python3.5/site-packages/benchmark.py ws://daphne:8000
+    depends_on:
+      - daphne
+      - worker
