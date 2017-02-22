@@ -6,6 +6,7 @@ from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
 from pika.channel import Channel as AMQPChannel
+from pika.exceptions import ConnectionClosed
 from pika.spec import Basic, BasicProperties
 
 try:
@@ -552,6 +553,8 @@ class ConnectionThread(Thread):
 
     def schedule(self, f, *args, **kwargs):
 
+        if self.amqp.connection.is_closing or self.amqp.connection.is_closed:
+            raise ConnectionClosed
         future = Future()
         self.calls.put(
             (get_ident(), partial(f, *args, **kwargs), future),

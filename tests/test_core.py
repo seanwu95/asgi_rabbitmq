@@ -9,6 +9,7 @@ from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
 from channels.worker import Worker
+from pika.exceptions import ConnectionClosed
 
 
 class RabbitmqChannelLayerTest(ConformanceTestCase):
@@ -273,3 +274,19 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         channel, message = self.channel_layer.receive(['ch_test'])
         assert channel == 'ch_test'
         assert message == {'value': 'blue'}
+
+    def test_resolve_callbacks_during_connection_close(self):
+        """
+        Connection can be in closing state.  If during this little time
+        frame another thread tries to schedule callback into this
+        connection, we should interrupt immediately.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.amqp.futures:
+            time.sleep(0.5)
+        # Try to call layer send right after connection close frame
+        # was sent.
+        self.channel_layer.thread.amqp.connection.close()
+        with pytest.raises(ConnectionClosed):
+            self.channel_layer.send('foo', {'bar': 'baz'})
