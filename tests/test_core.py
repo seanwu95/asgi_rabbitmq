@@ -292,6 +292,23 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         with pytest.raises(ConnectionClosed):
             future.result()
 
+    def test_deny_schedule_calls_to_the_closed_connection(self):
+        """
+        If connection is already closed, it shouldn't be possible to call
+        layer methods on it.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.amqp.connection.is_open:
+            time.sleep(0.5)
+        # Close connection and wait for it.
+        self.channel_layer.thread.amqp.connection.close()
+        while not self.channel_layer.thread.amqp.connection.is_closed:
+            time.sleep(0.5)
+        # Look into is_closed check.
+        with pytest.raises(ConnectionClosed):
+            self.channel_layer.send('foo', {'bar': 'baz'})
+
     def test_resolve_callbacks_during_connection_close(self):
         """
         Connection can be in closing state.  If during this little time
@@ -300,7 +317,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         """
 
         # Wait for connection established.
-        while not self.channel_layer.thread.amqp.futures:
+        while not self.channel_layer.thread.amqp.connection.is_open:
             time.sleep(0.5)
         # Try to call layer send right after connection close frame
         # was sent.
