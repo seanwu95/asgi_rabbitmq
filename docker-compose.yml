@@ -17,6 +17,21 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py27-django18,py27-django19,py27-django110
+  py27dj18:
+    <<: *py27
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py27-django18
+  py27dj19:
+    <<: *py27
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py27-django19
+  py27dj110:
+    <<: *py27
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py27-django110
   py34: &py34
     image: asgirabbitmq_py34
     build:
@@ -30,6 +45,21 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py34-django18,py34-django19,py34-django110
+  py34dj18:
+    <<: *py34
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py34-django18
+  py34dj19:
+    <<: *py34
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py34-django19
+  py34dj110:
+    <<: *py34
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py34-django110
   py35: &py35
     image: asgirabbitmq_py35
     build:
@@ -43,6 +73,21 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py35-django18,py35-django19,py35-django110
+  py35dj18:
+    <<: *py35
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py35-django18
+  py35dj19:
+    <<: *py35
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py35-django19
+  py35dj110:
+    <<: *py35
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py35-django110
   kernel:
     build:
       context: .
