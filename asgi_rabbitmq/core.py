@@ -13,14 +13,9 @@ except ImportError:
     from futures import Future
 
 try:
-    from threading import Thread, get_ident
+    from threading import Thread, Lock, get_ident
 except ImportError:
-    from threading import Thread, _get_ident as get_ident
-
-try:
-    import queue
-except ImportError:
-    import Queue as queue
+    from threading import Thread, Lock, _get_ident as get_ident
 
 SEND = 0
 RECEIVE = 1
@@ -417,7 +412,8 @@ class RabbitmqConnection(object):
         self.channel_capacity = channel_capacity
 
         self.protocols = {}
-        self.method_calls = queue.Queue()
+        self.lock = Lock()
+        self.lock.acquire()
         self.parameters = self.Parameters(self.url)
         self.connection = self.Connection(
             parameters=self.parameters,
@@ -433,17 +429,8 @@ class RabbitmqConnection(object):
 
     def start_loop(self, connection):
 
-        self.method_calls.put((None, (DECLARE_DEAD_LETTERS, (), {}), Future()))
-        self.check_method_call()
-
-    def check_method_call(self):
-
-        try:
-            ident, method, future = self.method_calls.get_nowait()
-            self.process(ident, method, future)
-        except queue.Empty:
-            pass
-        self.connection.add_timeout(0.01, self.check_method_call)
+        self.process(None, (DECLARE_DEAD_LETTERS, (), {}), Future())
+        self.lock.release()
 
     def process(self, ident, method, future):
 
@@ -483,10 +470,8 @@ class RabbitmqConnection(object):
         if self.connection.is_closing or self.connection.is_closed:
             raise ConnectionClosed
         future = Future()
-        # TODO: is this timer based queue polling is necessary at all?!
-        #
-        # Maybe threading.Lock will be enough.
-        self.method_calls.put((get_ident(), (f, args, kwargs), future))
+        with self.lock:
+            self.process(get_ident(), (f, args, kwargs), future)
         return future
 
 
