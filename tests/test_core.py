@@ -5,6 +5,7 @@ from collections import defaultdict
 import pytest
 from asgi_ipc import IPCChannelLayer
 from asgi_rabbitmq import RabbitmqChannelLayer
+from asgi_rabbitmq.core import EXPIRE_GROUP_MEMBER
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
@@ -262,7 +263,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
         self.channel_layer.group_add('gr_test', 'ch_test')
         self.channel_layer.thread.schedule(
-            self.channel_layer.thread.amqp.expire_group_member,
+            EXPIRE_GROUP_MEMBER,
             'gr_test',
             'ch_test',
         )
@@ -282,13 +283,12 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         """
 
         # Wait for connection established.
-        while not self.channel_layer.thread.amqp.futures:
+        while not self.channel_layer.thread.connection.protocols:
             time.sleep(0.5)
         # Get dead letters future.
-        amqp = self.channel_layer.thread.amqp
-        future = amqp.futures[amqp.channels[amqp.numbers[None]]]
+        future = self.channel_layer.thread.connection.protocols[None].resolve
         # Look into on_close_callback.
-        self.channel_layer.thread.amqp.connection.close()
+        self.channel_layer.thread.connection.connection.close()
         with pytest.raises(ConnectionClosed):
             future.result()
 
@@ -299,11 +299,11 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         """
 
         # Wait for connection established.
-        while not self.channel_layer.thread.amqp.connection.is_open:
+        while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
         # Close connection and wait for it.
-        self.channel_layer.thread.amqp.connection.close()
-        while not self.channel_layer.thread.amqp.connection.is_closed:
+        self.channel_layer.thread.connection.connection.close()
+        while not self.channel_layer.thread.connection.connection.is_closed:
             time.sleep(0.5)
         # Look into is_closed check.
         with pytest.raises(ConnectionClosed):
@@ -317,10 +317,10 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         """
 
         # Wait for connection established.
-        while not self.channel_layer.thread.amqp.connection.is_open:
+        while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
         # Try to call layer send right after connection close frame
         # was sent.
-        self.channel_layer.thread.amqp.connection.close()
+        self.channel_layer.thread.connection.connection.close()
         with pytest.raises(ConnectionClosed):
             self.channel_layer.send('foo', {'bar': 'baz'})

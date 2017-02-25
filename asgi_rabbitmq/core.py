@@ -1,11 +1,9 @@
-import weakref
 from functools import partial
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
-from pika.channel import Channel as AMQPChannel
 from pika.exceptions import ConnectionClosed
 from pika.spec import Basic, BasicProperties
 
@@ -24,194 +22,53 @@ try:
 except ImportError:
     import Queue as queue
 
-
-class LayerAMQPChannel(AMQPChannel):
-
-    def __init__(self, *args, **kwargs):
-
-        self.amqp_ref = kwargs.pop('amqp_ref')
-        super(LayerAMQPChannel, self).__init__(*args, **kwargs)
-
-    def _on_deliver(self, method_frame, header_frame, body):
-
-        # TODO: Refactor to the context manager.
-        amqp = self.amqp_ref()
-        try:
-            amqp.amqp_channel = amqp.channels.get(method_frame.channel_number)
-            amqp.resolve = amqp.futures.get(amqp.amqp_channel)
-            return super(LayerAMQPChannel, self)._on_deliver(
-                method_frame, header_frame, body)
-        except Exception as error:
-            try:
-                amqp.resolve.set_exception(error)
-            except AttributeError:
-                pass
-        finally:
-            try:
-                del amqp.amqp_channel
-            except AttributeError:
-                pass
-            try:
-                del amqp.resolve
-            except AttributeError:
-                pass
-
-    def _on_getok(self, method_frame, header_frame, body):
-
-        # TODO: Refactor to the context manager.
-        amqp = self.amqp_ref()
-        try:
-            amqp.amqp_channel = amqp.channels.get(method_frame.channel_number)
-            amqp.resolve = amqp.futures.get(amqp.amqp_channel)
-            return super(LayerAMQPChannel, self)._on_getok(
-                method_frame,
-                header_frame,
-                body,
-            )
-        except Exception as error:
-            try:
-                amqp.resolve.set_exception(error)
-            except AttributeError:
-                pass
-        finally:
-            try:
-                del amqp.amqp_channel
-            except AttributeError:
-                pass
-            try:
-                del amqp.resolve
-            except AttributeError:
-                pass
+SEND = 0
+RECEIVE = 1
+NEW_CHANNEL = 2
+DECLARE_CHANNEL = 3
+GROUP_ADD = 4
+GROUP_DISCARD = 5
+SEND_GROUP = 6
+DECLARE_DEAD_LETTERS = 7
+EXPIRE_GROUP_MEMBER = 8
 
 
-class LayerSelectConnection(SelectConnection):
-
-    Channel = LayerAMQPChannel
-
-    def __init__(self, *args, **kwargs):
-
-        self.amqp_ref = kwargs.pop('amqp_ref')
-        kwargs['on_close_callback'] = self.notify_futures
-        kwargs['stop_ioloop_on_close'] = False
-        super(LayerSelectConnection, self).__init__(*args, **kwargs)
-
-    def notify_futures(self, connection, code, msg):
-
-        try:
-            amqp = self.amqp_ref()
-            for future in amqp.futures.values():
-                future.set_exception(ConnectionClosed())
-        finally:
-            self.ioloop.stop()
-
-    def _create_channel(self, channel_number, on_open_callback):
-
-        return self.Channel(
-            self,
-            channel_number,
-            on_open_callback,
-            amqp_ref=self.amqp_ref,
-        )
-
-    def _process_callbacks(self, frame_value):
-
-        # TODO: Refactor to the context manager.
-        amqp = self.amqp_ref()
-        try:
-            amqp.amqp_channel = amqp.channels.get(frame_value.channel_number)
-            amqp.resolve = amqp.futures.get(amqp.amqp_channel)
-            return super(LayerSelectConnection,
-                         self)._process_callbacks(frame_value)
-        except Exception as error:
-            try:
-                amqp.resolve.set_exception(error)
-            except AttributeError:
-                pass
-        finally:
-            try:
-                del amqp.amqp_channel
-            except AttributeError:
-                pass
-            try:
-                del amqp.resolve
-            except AttributeError:
-                pass
-
-
-class AMQP(object):
+class Protocol(object):
 
     dead_letters = 'dead-letters'
-    Parameters = URLParameters
-    Connection = LayerSelectConnection
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
-                 method_calls):
+    def __init__(self, expiry, group_expiry, capacity, channel_capacity, ident,
+                 process):
 
-        self.parameters = self.Parameters(url)
-        self.connection = self.Connection(
-            parameters=self.parameters,
-            on_open_callback=self.on_connection_open,
-            amqp_ref=weakref.ref(self),
-        )
         self.expiry = expiry
         self.group_expiry = group_expiry
         self.capacity = capacity
         self.channel_capacity = channel_capacity
-        self.method_calls = method_calls
-        self.channels = {}
-        self.numbers = {}
-        self.futures = {}
+        self.ident = ident
+        self.process = process
 
-    # Connection handling.
-
-    def run(self):
-
-        self.connection.ioloop.start()
-
-    def on_connection_open(self, connection):
-
-        self.process(None, self.on_dead_letter_channel_open, Future())
-        self.check_method_call()
-
-    def check_method_call(self):
-
-        try:
-            ident, method, future = self.method_calls.get_nowait()
-            self.process(ident, method, future)
-        except queue.Empty:
-            pass
-        self.connection.add_timeout(0.01, self.check_method_call)
-
-    def process(self, ident, method, future):
-
-        if (ident in self.numbers and
-                self.channels[self.numbers[ident]].is_open):
-            self.futures[self.channels[self.numbers[ident]]] = future
-            self.apply_with_context(ident, method)
-            return
-        self.connection.channel(
-            partial(self.register_channel, ident, method, future),
-        )
-
-    def register_channel(self, ident, method, future, amqp_channel):
-
-        self.numbers[ident] = amqp_channel.channel_number
-        self.channels[amqp_channel.channel_number] = amqp_channel
-        self.futures[amqp_channel] = future
-        self.apply_with_context(ident, method)
-
-    def apply_with_context(self, ident, method):
-        try:
-            self.amqp_channel = self.channels[self.numbers[ident]]
-            self.resolve = self.futures[self.amqp_channel]
-            method()
-        except Exception as error:
-            self.resolve.set_exception(error)
-        finally:
-            del self.amqp_channel
-            del self.resolve
+        self.methods = {
+            SEND: self.send,
+            RECEIVE: self.receive,
+            NEW_CHANNEL: self.new_channel,
+            DECLARE_CHANNEL: self.declare_channel,
+            GROUP_ADD: self.group_add,
+            GROUP_DISCARD: self.group_discard,
+            SEND_GROUP: self.send_group,
+            DECLARE_DEAD_LETTERS: self.declare_dead_letters,
+            EXPIRE_GROUP_MEMBER: self.expire_group_member,
+        }
 
     # Utilities.
+
+    def register_channel(self, method, amqp_channel):
+
+        self.amqp_channel = amqp_channel
+        self.apply(*method)
+
+    def apply(self, method_id, args, kwargs):
+
+        self.methods[method_id](*args, **kwargs)
 
     def get_queue_name(self, channel):
 
@@ -350,14 +207,9 @@ class AMQP(object):
 
     def no_queue(self, channels, amqp_channel, code, msg):
 
-        idents = {v: k for k, v in self.numbers.items()}
-        ident = idents[amqp_channel.channel_number]
-        del self.channels[amqp_channel.channel_number]
-        del self.numbers[ident]
-        del self.futures[amqp_channel]
         self.process(
-            ident,
-            partial(self.receive, channels, block=False),
+            self.ident,
+            (RECEIVE, (channels, False), {}),
             self.resolve,
         )
 
@@ -440,17 +292,6 @@ class AMQP(object):
         )
 
     # Dead letters processing.
-
-    def on_dead_letter_channel_open(self):
-
-        self.amqp_channel.add_on_close_callback(
-            self.on_dead_letter_channel_close,
-        )
-        self.declare_dead_letters()
-
-    def on_dead_letter_channel_close(self, amqp_channel, code, msg):
-
-        self.process(None, self.on_dead_letter_channel_open, Future())
 
     def expire_group_member(self, group, channel):
 
@@ -543,6 +384,112 @@ class AMQP(object):
         return msgpack.unpackb(message, encoding='utf8')
 
 
+class LayerConnection(SelectConnection):
+
+    def __init__(self, *args, **kwargs):
+
+        self.on_callback_error_callback = kwargs.pop(
+            'on_callback_error_callback',
+        )
+        super(LayerConnection, self).__init__(*args, **kwargs)
+
+    def _process_callbacks(self, frame_value):
+
+        try:
+            return super(LayerConnection, self)._process_callbacks(frame_value)
+        except Exception as error:
+            self.on_callback_error_callback(frame_value, error)
+            raise
+
+
+class RabbitmqConnection(object):
+
+    Parameters = URLParameters
+    Connection = LayerConnection
+    Protocol = Protocol
+
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+
+        self.url = url
+        self.expiry = expiry
+        self.group_expiry = group_expiry
+        self.capacity = capacity
+        self.channel_capacity = channel_capacity
+
+        self.protocols = {}
+        self.method_calls = queue.Queue()
+        self.parameters = self.Parameters(self.url)
+        self.connection = self.Connection(
+            parameters=self.parameters,
+            on_open_callback=self.start_loop,
+            on_close_callback=self.notify_futures,
+            on_callback_error_callback=self.protocol_error,
+            stop_ioloop_on_close=False,
+        )
+
+    def run(self):
+
+        self.connection.ioloop.start()
+
+    def start_loop(self, connection):
+
+        self.method_calls.put((None, (DECLARE_DEAD_LETTERS, (), {}), Future()))
+        self.check_method_call()
+
+    def check_method_call(self):
+
+        try:
+            ident, method, future = self.method_calls.get_nowait()
+            self.process(ident, method, future)
+        except queue.Empty:
+            pass
+        self.connection.add_timeout(0.01, self.check_method_call)
+
+    def process(self, ident, method, future):
+
+        if (ident in self.protocols and
+                self.protocols[ident].amqp_channel.is_open):
+            self.protocols[ident].resolve = future
+            self.protocols[ident].apply(*method)
+            return
+        protocol = self.Protocol(self.expiry, self.group_expiry, self.capacity,
+                                 self.channel_capacity, ident, self.process)
+        protocol.resolve = future
+        self.connection.channel(
+            partial(protocol.register_channel, method),
+        )
+        # FIXME: possible race condition.
+        #
+        # Second schedule call was made after we create channel for
+        # the first call, but before RabbitMQ respond with Ok.  We
+        # should not fail with attribute error.
+        self.protocols[ident] = protocol
+
+    def notify_futures(self, connection, code, msg):
+
+        try:
+            for protocol in self.protocols.values():
+                protocol.resolve.set_exception(ConnectionClosed())
+        finally:
+            self.connection.ioloop.stop()
+
+    def protocol_error(self, frame_value, error):
+
+        for protocol in self.protocols.values():
+            protocol.resolve.set_exception(error)
+
+    def schedule(self, f, *args, **kwargs):
+
+        if self.connection.is_closing or self.connection.is_closed:
+            raise ConnectionClosed
+        future = Future()
+        # TODO: is this timer based queue polling is necessary at all?!
+        #
+        # Maybe threading.Lock will be enough.
+        self.method_calls.put((get_ident(), (f, args, kwargs), future))
+        return future
+
+
 class ConnectionThread(Thread):
     """
     Thread holding connection.
@@ -550,32 +497,29 @@ class ConnectionThread(Thread):
     Separate heartbeat frames processing from actual work.
     """
 
+    Connection = RabbitmqConnection
+
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
 
         super(ConnectionThread, self).__init__()
         self.daemon = True
-        self.calls = queue.Queue()
-        self.amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
-                         self.calls)
+        self.connection = self.Connection(url, expiry, group_expiry, capacity,
+                                          channel_capacity)
 
     def run(self):
 
-        self.amqp.run()
+        self.connection.run()
 
     def schedule(self, f, *args, **kwargs):
 
-        if self.amqp.connection.is_closing or self.amqp.connection.is_closed:
-            raise ConnectionClosed
-        future = Future()
-        self.calls.put(
-            (get_ident(), partial(f, *args, **kwargs), future),
-        )
-        return future
+        return self.connection.schedule(f, *args, **kwargs)
 
 
 class RabbitmqChannelLayer(BaseChannelLayer):
 
     extensions = ['groups']
+
+    Thread = ConnectionThread
 
     def __init__(self,
                  url,
@@ -590,61 +534,46 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             capacity=capacity,
             channel_capacity=channel_capacity,
         )
-        self.thread = ConnectionThread(url, expiry, group_expiry, capacity,
-                                       channel_capacity)
+        self.thread = self.Thread(url, expiry, group_expiry, capacity,
+                                  channel_capacity)
         self.thread.start()
 
     def send(self, channel, message):
 
-        future = self.thread.schedule(self.thread.amqp.send, channel, message)
+        future = self.thread.schedule(SEND, channel, message)
         return future.result()
 
     def receive(self, channels, block=False):
 
-        future = self.thread.schedule(
-            self.thread.amqp.receive,
-            channels,
-            block,
-        )
+        future = self.thread.schedule(RECEIVE, channels, block)
         return future.result()
 
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
-        future = self.thread.schedule(self.thread.amqp.new_channel)
+        future = self.thread.schedule(NEW_CHANNEL)
         queue_name = future.result()
         channel = pattern + queue_name
         return channel
 
     def declare_channel(self, channel):
 
-        future = self.thread.schedule(
-            self.thread.amqp.declare_channel,
-            channel,
-        )
+        future = self.thread.schedule(DECLARE_CHANNEL, channel)
         return future.result()
 
     def group_add(self, group, channel):
 
-        future = self.thread.schedule(
-            self.thread.amqp.group_add,
-            group,
-            channel,
-        )
+        future = self.thread.schedule(GROUP_ADD, group, channel)
         return future.result()
 
     def group_discard(self, group, channel):
 
-        future = self.thread.schedule(
-            self.thread.amqp.group_discard,
-            group,
-            channel,
-        )
+        future = self.thread.schedule(GROUP_DISCARD, group, channel)
         return future.result()
 
     def send_group(self, group, message):
 
-        self.thread.schedule(self.thread.amqp.send_group, group, message)
+        self.thread.schedule(SEND_GROUP, group, message)
 
 
 # TODO: is it optimal to read bytes from content frame, call python

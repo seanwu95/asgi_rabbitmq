@@ -10,6 +10,7 @@ from functools import wraps
 from operator import itemgetter
 
 import asgi_rabbitmq
+from pika.channel import Channel
 from pika.spec import Basic
 from tabulate import tabulate
 
@@ -39,7 +40,7 @@ def monkeypatch_all():
 
 def monkeypatch_connection():
 
-    asgi_rabbitmq.core.AMQP.Connection.Channel = DebugChannel
+    asgi_rabbitmq.core.RabbitmqConnection.Connection = DebugConnection
 
 
 def monkeypatch_layer():
@@ -156,7 +157,14 @@ def wrap(method, callback):
     return wrapper
 
 
-class DebugChannel(asgi_rabbitmq.core.AMQP.Connection.Channel):
+class DebugConnection(asgi_rabbitmq.core.LayerConnection):
+
+    def _create_channel(self, channel_number, on_open_callback):
+
+        return DebugChannel(self, channel_number, on_open_callback)
+
+
+class DebugChannel(Channel):
     """Collect statistics about RabbitMQ methods usage on channel."""
 
     def basic_ack(self, *args, **kwargs):
