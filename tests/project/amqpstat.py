@@ -10,15 +10,15 @@ from functools import wraps
 from operator import itemgetter
 
 import asgi_rabbitmq
-from pika import SelectConnection
 from pika.channel import Channel
-from pika.connection import LOGGER
+from pika.spec import Basic
 from tabulate import tabulate
 
 amqp_stats = {}
 layer_stats = {}
+consumers = {}
 
-BENCHMARK = 'BENCHMARK' in os.environ
+BENCHMARK = os.environ.get('BENCHMARK', 'False') == 'True'
 
 
 def maybe_monkeypatch():
@@ -40,7 +40,7 @@ def monkeypatch_all():
 
 def monkeypatch_connection():
 
-    asgi_rabbitmq.core.AMQP.Connection = DebugConnection
+    asgi_rabbitmq.core.RabbitmqConnection.Connection = DebugConnection
 
 
 def monkeypatch_layer():
@@ -157,12 +157,10 @@ def wrap(method, callback):
     return wrapper
 
 
-class DebugConnection(SelectConnection):
-    """Collect statistics about RabbitMQ methods usage on connection."""
+class DebugConnection(asgi_rabbitmq.core.LayerConnection):
 
     def _create_channel(self, channel_number, on_open_callback):
 
-        LOGGER.debug('Creating channel %s', channel_number)
         return DebugChannel(self, channel_number, on_open_callback)
 
 
@@ -179,11 +177,22 @@ class DebugChannel(Channel):
             wrap('basic_cancel', callback), *args, **kwargs)
 
     def basic_consume(self, *args, **kwargs):
-        # TODO: Measure latency here, since Consume-Ok is ignored with
-        # `self._on_eventok`.
-        amqp_stats.setdefault('basic_consume', 0)
-        amqp_stats['basic_consume'] += 1
-        return super(DebugChannel, self).basic_consume(*args, **kwargs)
+
+        start = time.time()
+        consumer_tag = super(DebugChannel, self).basic_consume(*args, **kwargs)
+        consumers[consumer_tag] = start
+        return consumer_tag
+
+    def _on_eventok(self, method_frame):
+
+        end = time.time()
+        if isinstance(method_frame.method, Basic.ConsumeOk):
+            start = consumers.pop(method_frame.method.consumer_tag)
+            latency = end - start
+            amqp_stats.setdefault('basic_consume', [])
+            amqp_stats['basic_consume'] += [latency]
+            return
+        return super(DebugChannel, self)._on_eventok(method_frame)
 
     def basic_get(self, callback=None, *args, **kwargs):
         # TODO: Measure latency for Get-Empty responses.
