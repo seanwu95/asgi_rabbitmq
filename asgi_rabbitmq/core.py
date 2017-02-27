@@ -64,6 +64,8 @@ class Protocol(object):
         }
         self.messages = {}
         self.receive_is_blocked_by = set()
+        # FIXME: protocol design is flaky against concurrent access.
+        self.receive_resolve = None
 
     # Utilities.
 
@@ -152,7 +154,10 @@ class Protocol(object):
 
         if channel_name in self.receive_is_blocked_by:
             self.receive_is_blocked_by = set()
-            self.resolve.set_result((channel_name, self.deserialize(body)))
+            self.receive_resolve.set_result(
+                (channel_name, self.deserialize(body)),
+            )
+            self.receive_resolve = None
         else:
             self.messages[channel_name].append(body)
 
@@ -168,6 +173,7 @@ class Protocol(object):
         else:
             if block:
                 self.receive_is_blocked_by = channels
+                self.receive_resolve = self.resolve
             else:
                 self.resolve.set_result((None, None))
 
@@ -181,6 +187,7 @@ class Protocol(object):
                 break
         else:
             self.receive_is_blocked_by = any_channel
+            self.receive_resolve = self.resolve
 
     # New channel.
 
