@@ -59,8 +59,6 @@ class Protocol(object):
         }
         self.messages = {}
         self.receive_is_blocked_by = set()
-        # FIXME: protocol design is flaky against concurrent access.
-        self.receive_resolve = None
 
     # Utilities.
 
@@ -147,12 +145,14 @@ class Protocol(object):
     def accept_message(self, channel_name, amqp_channel, method_frame,
                        properties, body):
 
+        # FIXME: Literally I don't understand what the FUCK is going on?!
         if channel_name in self.receive_is_blocked_by:
+            try:
+                resolve = self.receive_is_blocked_by.future
+            except AttributeError:
+                resolve = self.resolve
             self.receive_is_blocked_by = set()
-            self.receive_resolve.set_result(
-                (channel_name, self.deserialize(body)),
-            )
-            self.receive_resolve = None
+            resolve.set_result((channel_name, self.deserialize(body)))
         else:
             self.messages[channel_name].append(body)
 
@@ -168,7 +168,6 @@ class Protocol(object):
         else:
             if block:
                 self.receive_is_blocked_by = channels
-                self.receive_resolve = self.resolve
             else:
                 self.resolve.set_result((None, None))
 
@@ -181,8 +180,7 @@ class Protocol(object):
                 self.resolve.set_result((channel, message))
                 break
         else:
-            self.receive_is_blocked_by = any_channel
-            self.receive_resolve = self.resolve
+            self.receive_is_blocked_by = AnyChannel(self.resolve)
 
     # New channel.
 
@@ -574,8 +572,9 @@ worker_ready.connect(worker_start_hook)
 
 class AnyChannel(object):
 
+    def __init__(self, future):
+
+        self.future = future
+
     def __contains__(self, _):
         return True
-
-
-any_channel = AnyChannel()
