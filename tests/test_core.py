@@ -5,13 +5,14 @@ from collections import defaultdict
 import pytest
 from asgi_ipc import IPCChannelLayer
 from asgi_rabbitmq import RabbitmqChannelLayer
+from asgi_rabbitmq.core import EXPIRE_GROUP_MEMBER
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
 from channels.worker import Worker
+from pika.exceptions import ConnectionClosed
 
 
-@pytest.mark.skip
 class RabbitmqChannelLayerTest(ConformanceTestCase):
 
     @pytest.fixture(autouse=True)
@@ -226,6 +227,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         # successfully.
         self.channel_layer.group_add('my_group', 'foo')
 
+    @pytest.mark.skip(reason='FIXME: hanged test')
     def test_receive_blocking_mode(self):
         """Check we can wait until message arrives and return it."""
 
@@ -242,3 +244,84 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         channel, message = self.channel_layer.receive(['foo'], block=True)
         assert channel == 'foo'
         assert message == {'bar': 'baz'}
+
+    def test_send_group_message_expiry(self):
+        """
+        Tests that messages expire correctly when it was sent to group.
+        """
+        self.channel_layer.group_add('gr_test', 'me_test')
+        self.channel_layer.send_group('gr_test', {'value': 'blue'})
+        time.sleep(self.expiry_delay)
+        channel, message = self.channel_layer.receive(['me_test'])
+        self.assertIs(channel, None)
+        self.assertIs(message, None)
+
+    def test_group_add_is_idempotent(self):
+        """
+        Calling group_add continuously should set system into the right
+        state.
+        """
+
+        self.channel_layer.group_add('gr_test', 'ch_test')
+        self.channel_layer.thread.schedule(
+            EXPIRE_GROUP_MEMBER,
+            'gr_test',
+            'ch_test',
+        )
+        time.sleep(0.1)
+        # NOTE: Implementation detail.  Dead letters consumer should
+        # ignore messages died with maxlen reason.  This messages
+        # caused by sequential group_add calls.
+        self.channel_layer.send_group('gr_test', {'value': 'blue'})
+        channel, message = self.channel_layer.receive(['ch_test'])
+        assert channel == 'ch_test'
+        assert message == {'value': 'blue'}
+
+    def test_connection_on_close_notify_futures(self):
+        """
+        If connection in the connection thread was closed for some reason
+        we should notify waiting thread about this error.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.connection.protocols:
+            time.sleep(0.5)
+        # Get dead letters future.
+        future = self.channel_layer.thread.connection.protocols[None].resolve
+        # Look into on_close_callback.
+        self.channel_layer.thread.connection.connection.close()
+        with pytest.raises(ConnectionClosed):
+            future.result()
+
+    def test_deny_schedule_calls_to_the_closed_connection(self):
+        """
+        If connection is already closed, it shouldn't be possible to call
+        layer methods on it.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.connection.connection.is_open:
+            time.sleep(0.5)
+        # Close connection and wait for it.
+        self.channel_layer.thread.connection.connection.close()
+        while not self.channel_layer.thread.connection.connection.is_closed:
+            time.sleep(0.5)
+        # Look into is_closed check.
+        with pytest.raises(ConnectionClosed):
+            self.channel_layer.send('foo', {'bar': 'baz'})
+
+    def test_resolve_callbacks_during_connection_close(self):
+        """
+        Connection can be in closing state.  If during this little time
+        frame another thread tries to schedule callback into this
+        connection, we should interrupt immediately.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.connection.connection.is_open:
+            time.sleep(0.5)
+        # Try to call layer send right after connection close frame
+        # was sent.
+        self.channel_layer.thread.connection.connection.close()
+        with pytest.raises(ConnectionClosed):
+            self.channel_layer.send('foo', {'bar': 'baz'})

@@ -4,7 +4,8 @@ services:
     image: rabbitmq:management
     ports:
       - "15672:15672"
-  py27:
+  py27: &py27
+    image: asgirabbitmq_py27
     build:
       context: .
       dockerfile: compose/py27
@@ -16,9 +17,23 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py27-django18,py27-django19,py27-django110
-    ports:
-      - "8000:8000"
-  py34:
+  py27dj18:
+    <<: *py27
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py27-django18
+  py27dj19:
+    <<: *py27
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py27-django19
+  py27dj110:
+    <<: *py27
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py27-django110
+  py34: &py34
+    image: asgirabbitmq_py34
     build:
       context: .
       dockerfile: compose/py34
@@ -30,9 +45,23 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py34-django18,py34-django19,py34-django110
-    ports:
-      - "8001:8000"
-  py35:
+  py34dj18:
+    <<: *py34
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py34-django18
+  py34dj19:
+    <<: *py34
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py34-django19
+  py34dj110:
+    <<: *py34
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py34-django110
+  py35: &py35
+    image: asgirabbitmq_py35
     build:
       context: .
       dockerfile: compose/py35
@@ -44,8 +73,21 @@ services:
     environment:
       RABBITMQ_HOST: rabbitmq
       TOXENV: py35-django18,py35-django19,py35-django110
-    ports:
-      - "8002:8000"
+  py35dj18:
+    <<: *py35
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py35-django18
+  py35dj19:
+    <<: *py35
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py35-django19
+  py35dj110:
+    <<: *py35
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      TOXENV: py35-django110
   kernel:
     build:
       context: .
@@ -59,3 +101,27 @@ services:
       PYTHONPATH: /code/.tox3.5.2/py35-django110/lib/python3.5/site-packages
     ports:
       - "8889:8889"
+  daphne:
+    <<: *py35
+    command: /code/.tox3.5.2/py35-django110/bin/daphne demo.asgi:channel_layer -e tcp:port=8000:interface=0.0.0.0
+    # <<: *py27
+    # command: /code/.tox2.7.13/py27-django110/bin/daphne demo.asgi:channel_layer -e tcp:port=8000:interface=0.0.0.0
+    environment:
+      PYTHONPATH: /code/tests/project
+      DJANGO_SETTINGS_MODULE: demo.settings_benchmark
+  worker:
+    <<: *py35
+    command: /code/.tox3.5.2/py35-django110/bin/django-admin runworker
+    # <<: *py27
+    # command: /code/.tox2.7.13/py27-django110/bin/django-admin runworker
+    environment:
+      PYTHONPATH: /code/tests/project
+      DJANGO_SETTINGS_MODULE: demo.settings_benchmark
+  benchmark:
+    <<: *py35
+    command: /code/.tox3.5.2/py35-django110/bin/python /code/.tox3.5.2/py35-django110/lib/python3.5/site-packages/benchmark.py ws://daphne:8000
+    # <<: *py27
+    # command: /code/.tox2.7.13/py27-django110/bin/python /code/.tox2.7.13/py27-django110/lib/python2.7/site-packages/benchmark.py ws://daphne:8000
+    depends_on:
+      - daphne
+      - worker

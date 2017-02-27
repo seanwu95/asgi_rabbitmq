@@ -1,10 +1,11 @@
 from collections import deque
-from functools import partial, wraps
+from functools import partial
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
+from pika.exceptions import ConnectionClosed
 from pika.spec import BasicProperties
 from twisted.internet import defer, reactor
 
@@ -23,85 +24,57 @@ try:
 except ImportError:
     import Queue as queue
 
+SEND = 0
+RECEIVE = 1
+NEW_CHANNEL = 2
+DECLARE_CHANNEL = 3
+GROUP_ADD = 4
+GROUP_DISCARD = 5
+SEND_GROUP = 6
+DECLARE_DEAD_LETTERS = 7
+EXPIRE_GROUP_MEMBER = 8
+RECEIVE_TWISTED = 9
 
-class PropagatedError(Exception):
-    """Exception raised to show error from the connection thread."""
 
-
-class AMQP(object):
+class Protocol(object):
 
     dead_letters = 'dead-letters'
-    Parameters = URLParameters
-    Connection = SelectConnection
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
-                 method_calls):
+    def __init__(self, expiry, group_expiry, capacity, channel_capacity, ident,
+                 process):
 
-        self.parameters = self.Parameters(url)
-        self.connection = self.Connection(
-            parameters=self.parameters,
-            on_open_callback=self.on_connection_open,
-        )
         self.expiry = expiry
         self.group_expiry = group_expiry
         self.capacity = capacity
         self.channel_capacity = channel_capacity
-        self.method_calls = method_calls
-        self.channels = {}
+        self.ident = ident
+        self.process = process
+
+        self.methods = {
+            SEND: self.send,
+            RECEIVE: self.receive,
+            NEW_CHANNEL: self.new_channel,
+            DECLARE_CHANNEL: self.declare_channel,
+            GROUP_ADD: self.group_add,
+            GROUP_DISCARD: self.group_discard,
+            SEND_GROUP: self.send_group,
+            DECLARE_DEAD_LETTERS: self.declare_dead_letters,
+            EXPIRE_GROUP_MEMBER: self.expire_group_member,
+            RECEIVE_TWISTED: self.receive_twisted,
+        }
         self.messages = {}
-        self.blocked = {}
-
-    # Connection handling.
-
-    def run(self):
-
-        self.connection.ioloop.start()
-
-    def on_connection_open(self, connection):
-
-        connection.channel(self.on_channel_open)
-        self.check_method_call()
-
-    def on_channel_open(self, amqp_channel):
-
-        amqp_channel.add_on_close_callback(self.on_channel_close)
-        self.declare_dead_letters(amqp_channel)
-
-    def on_channel_close(self, amqp_channel, code, msg):
-
-        # FIXME: Check if error is recoverable.
-        amqp_channel.connection.channel(self.on_channel_open)
-
-    def check_method_call(self):
-
-        try:
-            ident, method = self.method_calls.get_nowait()
-            self.process(ident, method)
-        except queue.Empty:
-            pass
-        self.connection.add_timeout(0.01, self.check_method_call)
-
-    def process(self, ident, method):
-
-        if ident in self.channels:
-            amqp_channel = self.channels[ident]
-            if amqp_channel.is_open:
-                method(amqp_channel=amqp_channel)
-                return
-        self.connection.channel(
-            partial(
-                self.register_channel,
-                ident=ident,
-                method=method,
-            ))
-
-    def register_channel(self, amqp_channel, ident, method=None):
-
-        self.channels[ident] = amqp_channel
-        if method:
-            method(amqp_channel=amqp_channel)
+        self.receive_is_blocked_by = set()
 
     # Utilities.
+
+    def register_channel(self, method, amqp_channel):
+
+        self.amqp_channel = amqp_channel
+        self.apply(*method)
+
+    def apply(self, method_id, args, kwargs):
+
+        self.methods[method_id](*args, **kwargs)
 
     def get_queue_name(self, channel):
 
@@ -112,291 +85,257 @@ class AMQP(object):
         else:
             return channel
 
-    def propagate_error(method):
-
-        @wraps(method)
-        def method_wrapper(self, **kwargs):
-
-            try:
-                method(self, **kwargs)
-            except Exception as error:
-                kwargs['resolve'].set_exception(error)
-
-        return method_wrapper
-
-    def propagate_on_close(method):
-
-        @wraps(method)
-        def method_wrapper(self, **kwargs):
-
-            amqp_channel = kwargs['amqp_channel']
-            resolve = kwargs['resolve']
-            custom_handler = method(self, **kwargs)
-
-            def onerror(channel, code, msg):
-                if custom_handler:
-                    custom_handler(channel, code, msg)
-                else:
-                    resolve.set_exception(PropagatedError(code, msg))
-
-            resolve.add_done_callback(
-                partial(
-                    amqp_channel.callbacks.remove,
-                    amqp_channel.channel_number,
-                    '_on_channel_close',
-                    onerror,
-                ))
-            amqp_channel.add_on_close_callback(onerror)
-
-        return method_wrapper
-
     # Send.
 
-    @propagate_on_close
-    def send(self, amqp_channel, channel, message, resolve):
+    def send(self, channel, message):
 
-        routing_key = self.get_queue_name(channel)
+        # FIXME: Avoid constant queue declaration.  Or at least try to
+        # minimize its impact to system.
+        queue = self.get_queue_name(channel)
+        self.amqp_channel.queue_declare(
+            partial(self.publish_message, channel, message),
+            queue=queue,
+            passive=True if '!' in channel or '?' in channel else False,
+            arguments={'x-dead-letter-exchange': self.dead_letters},
+        )
+
+    def publish_message(self, channel, message, method_frame):
+
+        if method_frame.method.message_count >= self.capacity:
+            self.resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
+            return
+        queue = self.get_queue_name(channel)
         body = self.serialize(message)
+        self.amqp_channel.basic_publish(
+            exchange='',
+            routing_key=queue,
+            body=body,
+            properties=self.publish_properties,
+        )
+        self.resolve.set_result(None)
+
+    @property
+    def publish_properties(self):
+
         expiration = str(self.expiry * 1000)
         properties = BasicProperties(expiration=expiration)
-        amqp_channel.basic_publish(
-            exchange='',
-            routing_key=routing_key,
-            body=body,
-            properties=properties,
-        )
-        resolve.set_result(None)
+        return properties
 
-    def declare_channel(self, amqp_channel, channel, resolve):
+    # Declare channel.
 
-        amqp_channel.queue_declare(
-            lambda method_frame: self.subscribe_to_channel(
-                amqp_channel,
-                channel,
-                resolve,
-            ),
+    def declare_channel(self, channel):
+
+        self.amqp_channel.queue_declare(
+            partial(self.channel_declared, channel),
             queue=channel,
             arguments={'x-dead-letter-exchange': self.dead_letters},
         )
 
-    def subscribe_to_channel(self, amqp_channel, channel, resolve):
+    def channel_declared(self, channel, method_frame):
 
-        self.messages[channel] = deque()
-        amqp_channel.basic_consume(
-            partial(self.accept_message, channel=channel),
-            queue=self.get_queue_name(channel),
-            no_ack=True,
-        )
-        resolve.set_result(channel)
-
-    def accept_message(self, amqp_channel, method_frame, properties, body,
-                       channel):
-
-        for resolve, channels in self.blocked.items():
-            # FIXME: None channels is a hack here to try Twisted support.
-            if channels is None or channel in channels:
-                del self.blocked[resolve]
-                resolve.set_result((channel, self.deserialize(body)))
-                break
-        else:
-            self.messages[channel].append(body)
+        self.subscribe_to_channel(channel)
 
     # Receive.
 
-    @propagate_error
-    @propagate_on_close
-    def receive(self, amqp_channel, channels, block, resolve):
+    def subscribe_to_channel(self, channel):
+
+        self.messages[channel] = deque()
+        self.amqp_channel.basic_consume(
+            partial(self.accept_message, channel),
+            queue=self.get_queue_name(channel),
+            no_ack=True,
+        )
+        self.resolve.set_result(channel)
+
+    def accept_message(self, channel_name, amqp_channel, method_frame,
+                       properties, body):
+
+        if channel_name in self.receive_is_blocked_by:
+            self.receive_is_blocked_by = set()
+            self.resolve.set_result((channel_name, self.deserialize(body)))
+        else:
+            self.messages[channel_name].append(body)
+
+    def receive(self, channels, block):
 
         for channel in channels:
             messages = self.messages.get(channel)
             if messages:
                 body = messages.popleft()
                 message = self.deserialize(body)
-                resolve.set_result((channel, message))
+                self.resolve.set_result((channel, message))
                 break
         else:
             if block:
-                self.blocked[resolve] = channels
+                self.receive_is_blocked_by = channels
             else:
-                resolve.set_result((None, None))
+                self.resolve.set_result((None, None))
 
-    def receive_twisted(self, amqp_channel, resolve):
+    def receive_twisted(self):
 
         for channel, messages in self.messages.items():
             if messages:
                 body = messages.popleft()
                 message = self.deserialize(body)
-                resolve.set_result((channel, message))
+                self.resolve.set_result((channel, message))
                 break
         else:
-            self.blocked[resolve] = None
+            self.receive_is_blocked_by = any_channel
 
     # New channel.
 
-    @propagate_error
-    @propagate_on_close
-    def new_channel(self, amqp_channel, pattern, resolve):
+    def new_channel(self, pattern):
 
-        amqp_channel.queue_declare(
-            lambda method_frame: self.subscribe_to_channel(
-                amqp_channel,
-                pattern + method_frame.method.queue,
-                resolve,
-            ),
+        self.amqp_channel.queue_declare(
+            partial(self.new_channel_declared, pattern),
         )
+
+    def new_channel_declared(self, pattern, method_frame):
+
+        self.subscribe_to_channel(pattern + method_frame.method.queue)
 
     # Groups.
 
-    @propagate_error
-    @propagate_on_close
-    def group_add(self, amqp_channel, group, channel, resolve):
+    def group_add(self, group, channel):
 
         # FIXME: Is it possible to do this things in parallel?
-        self.expire_group_member(amqp_channel, group, channel)
-        declare_group = partial(
-            amqp_channel.exchange_declare,
+        self.expire_group_member(group, channel)
+
+        def after_bind(method_frame):
+
+            self.resolve.set_result(None)
+
+        def bind_channel(method_frame):
+
+            self.amqp_channel.queue_bind(
+                after_bind,
+                queue=self.get_queue_name(channel),
+                exchange=channel,
+            )
+
+        def bind_group(method_frame):
+
+            self.amqp_channel.exchange_bind(
+                bind_channel,
+                destination=channel,
+                source=group,
+            )
+
+        def declare_channel(method_frame):
+            if '!' in channel or '?' in channel:
+                bind_group(None)
+            else:
+                self.amqp_channel.queue_declare(
+                    bind_group,
+                    queue=channel,
+                    arguments={'x-dead-letter-exchange': self.dead_letters},
+                )
+
+        def declare_member(method_frame):
+            self.amqp_channel.exchange_declare(
+                declare_channel,
+                exchange=channel,
+                exchange_type='fanout',
+            )
+
+        self.amqp_channel.exchange_declare(
+            declare_member,
             exchange=group,
             exchange_type='fanout',
         )
-        declare_member = partial(
-            amqp_channel.exchange_declare,
-            exchange=channel,
-            exchange_type='fanout',
-        )
-        if '!' in channel or '?' in channel:
-            declare_channel = lambda callback: callback(method_frame=None)
-        else:
-            declare_channel = partial(
-                amqp_channel.queue_declare,
-                queue=channel,
-                arguments={'x-dead-letter-exchange': self.dead_letters},
-            )
-        bind_group = partial(
-            amqp_channel.exchange_bind,
-            destination=channel,
-            source=group,
-        )
-        bind_channel = partial(
-            amqp_channel.queue_bind,
-            queue=self.get_queue_name(channel),
-            exchange=channel,
-        )
-        declare_group(
-            lambda method_frame: declare_member(
-                lambda method_frame: declare_channel(
-                    lambda method_frame: bind_group(
-                        lambda method_frame: bind_channel(
-                            lambda method_frame: resolve.set_result(None),
-                        ),
-                    ),
-                ),
-            ),
-        )
 
-    @propagate_error
-    @propagate_on_close
-    def group_discard(self, amqp_channel, group, channel, resolve):
+    def group_discard(self, group, channel):
 
-        amqp_channel.exchange_unbind(
-            lambda method_frame: resolve.set_result(None),
+        self.amqp_channel.exchange_unbind(
+            lambda method_frame: self.resolve.set_result(None),
             destination=channel,
             source=group,
         )
 
-    def send_group(self, amqp_channel, group, message):
+    def send_group(self, group, message):
 
-        # FIXME: What about expiration property here?
         body = self.serialize(message)
-        amqp_channel.basic_publish(
+        self.amqp_channel.basic_publish(
             exchange=group,
             routing_key='',
             body=body,
+            properties=self.publish_properties,
         )
 
     # Dead letters processing.
 
-    def expire_group_member(self, amqp_channel, group, channel):
+    def expire_group_member(self, group, channel):
 
-        expire_marker = 'expire.bind.%s.%s' % (group,
-                                               self.get_queue_name(channel))
         ttl = self.group_expiry * 1000
-
-        declare_marker = partial(
-            amqp_channel.queue_declare,
-            queue=expire_marker,
+        self.amqp_channel.queue_declare(
+            partial(self.push_marker, group, channel),
+            queue=self.get_expire_marker(group, channel),
             arguments={
                 'x-dead-letter-exchange': self.dead_letters,
                 'x-message-ttl': ttl,
                 # FIXME: make this delay as little as possible.
                 'x-expires': ttl + 500,
                 'x-max-length': 1,
-            })
+            },
+        )
 
-        def push_marker(method_frame):
-            body = self.serialize({
-                'group': group,
-                'channel': channel,
-            })
-            amqp_channel.basic_publish(
-                exchange='',
-                routing_key=expire_marker,
-                body=body,
+    def push_marker(self, group, channel, method_frame):
+
+        body = self.serialize({
+            'group': group,
+            'channel': channel,
+        })
+        self.amqp_channel.basic_publish(
+            exchange='',
+            routing_key=self.get_expire_marker(group, channel),
+            body=body,
+        )
+
+    def get_expire_marker(self, group, channel):
+
+        return 'expire.bind.%s.%s' % (group, self.get_queue_name(channel))
+
+    def declare_dead_letters(self):
+
+        def consume(method_frame):
+
+            self.amqp_channel.basic_consume(
+                self.on_dead_letter,
+                queue=self.dead_letters,
             )
 
-        declare_marker(push_marker)
+        def do_bind(method_frame):
 
-    def declare_dead_letters(self, amqp_channel):
+            self.amqp_channel.queue_bind(
+                consume,
+                queue=self.dead_letters,
+                exchange=self.dead_letters,
+            )
 
-        declare_exchange = partial(
-            amqp_channel.exchange_declare,
+        def declare_queue(method_frame):
+
+            self.amqp_channel.queue_declare(
+                do_bind,
+                queue=self.dead_letters,
+            )
+
+        self.amqp_channel.exchange_declare(
+            declare_queue,
             exchange=self.dead_letters,
             exchange_type='fanout',
-        )
-        declare_queue = partial(
-            amqp_channel.queue_declare,
-            queue=self.dead_letters,
-        )
-        do_bind = partial(
-            amqp_channel.queue_bind,
-            queue=self.dead_letters,
-            exchange=self.dead_letters,
-        )
-        consume = partial(
-            self.consume_from_dead_letters,
-            amqp_channel=amqp_channel,
-        )
-        declare_exchange(
-            lambda method_frame: declare_queue(
-                lambda method_frame: do_bind(
-                    lambda method_frame: consume(),
-                ),
-            ),
-        )
-
-    def consume_from_dead_letters(self, amqp_channel):
-
-        amqp_channel.basic_consume(
-            self.on_dead_letter,
-            queue=self.dead_letters,
-            no_ack=True,
         )
 
     def on_dead_letter(self, amqp_channel, method_frame, properties, body):
 
-        # FIXME: Ignore max-length dead-letters.
         # FIXME: what the hell zero means here?
         queue = properties.headers['x-death'][0]['queue']
-        if self.is_expire_marker(queue):
+        reason = properties.headers['x-death'][0]['reason']
+        if self.is_expire_marker(queue) and reason == 'expired':
             message = self.deserialize(body)
             group = message['group']
             channel = message['channel']
-            self.group_discard(
-                amqp_channel=amqp_channel,
-                group=group,
-                channel=channel,
-                resolve=Future(),
-            )
-        else:
+            self.group_discard(group, channel)
+        elif not self.is_expire_marker(queue):
             amqp_channel.exchange_delete(exchange=queue)
 
     def is_expire_marker(self, queue):
@@ -414,8 +353,111 @@ class AMQP(object):
 
         return msgpack.unpackb(message, encoding='utf8')
 
-    del propagate_error
-    del propagate_on_close
+
+class LayerConnection(SelectConnection):
+
+    def __init__(self, *args, **kwargs):
+
+        self.on_callback_error_callback = kwargs.pop(
+            'on_callback_error_callback',
+        )
+        super(LayerConnection, self).__init__(*args, **kwargs)
+
+    def _process_callbacks(self, frame_value):
+
+        try:
+            return super(LayerConnection, self)._process_callbacks(frame_value)
+        except Exception as error:
+            self.on_callback_error_callback(frame_value, error)
+            raise
+
+
+class RabbitmqConnection(object):
+
+    Parameters = URLParameters
+    Connection = LayerConnection
+    Protocol = Protocol
+
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+
+        self.url = url
+        self.expiry = expiry
+        self.group_expiry = group_expiry
+        self.capacity = capacity
+        self.channel_capacity = channel_capacity
+
+        self.protocols = {}
+        self.method_calls = queue.Queue()
+        self.parameters = self.Parameters(self.url)
+        self.connection = self.Connection(
+            parameters=self.parameters,
+            on_open_callback=self.start_loop,
+            on_close_callback=self.notify_futures,
+            on_callback_error_callback=self.protocol_error,
+            stop_ioloop_on_close=False,
+        )
+
+    def run(self):
+
+        self.connection.ioloop.start()
+
+    def start_loop(self, connection):
+
+        self.method_calls.put((None, (DECLARE_DEAD_LETTERS, (), {}), Future()))
+        self.check_method_call()
+
+    def check_method_call(self):
+
+        try:
+            ident, method, future = self.method_calls.get_nowait()
+            self.process(ident, method, future)
+        except queue.Empty:
+            pass
+        self.connection.add_timeout(0.01, self.check_method_call)
+
+    def process(self, ident, method, future):
+
+        if (ident in self.protocols and
+                self.protocols[ident].amqp_channel.is_open):
+            self.protocols[ident].resolve = future
+            self.protocols[ident].apply(*method)
+            return
+        protocol = self.Protocol(self.expiry, self.group_expiry, self.capacity,
+                                 self.channel_capacity, ident, self.process)
+        protocol.resolve = future
+        self.connection.channel(
+            partial(protocol.register_channel, method),
+        )
+        # FIXME: possible race condition.
+        #
+        # Second schedule call was made after we create channel for
+        # the first call, but before RabbitMQ respond with Ok.  We
+        # should not fail with attribute error.
+        self.protocols[ident] = protocol
+
+    def notify_futures(self, connection, code, msg):
+
+        try:
+            for protocol in self.protocols.values():
+                protocol.resolve.set_exception(ConnectionClosed())
+        finally:
+            self.connection.ioloop.stop()
+
+    def protocol_error(self, frame_value, error):
+
+        for protocol in self.protocols.values():
+            protocol.resolve.set_exception(error)
+
+    def schedule(self, f, *args, **kwargs):
+
+        if self.connection.is_closing or self.connection.is_closed:
+            raise ConnectionClosed
+        future = Future()
+        # TODO: is this timer based queue polling is necessary at all?!
+        #
+        # Maybe threading.Lock will be enough.
+        self.method_calls.put((get_ident(), (f, args, kwargs), future))
+        return future
 
 
 class ConnectionThread(Thread):
@@ -425,22 +467,29 @@ class ConnectionThread(Thread):
     Separate heartbeat frames processing from actual work.
     """
 
+    Connection = RabbitmqConnection
+
     def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
 
         super(ConnectionThread, self).__init__()
         self.daemon = True
-        self.calls = queue.Queue()
-        self.amqp = AMQP(url, expiry, group_expiry, capacity, channel_capacity,
-                         self.calls)
+        self.connection = self.Connection(url, expiry, group_expiry, capacity,
+                                          channel_capacity)
 
     def run(self):
 
-        self.amqp.run()
+        self.connection.run()
+
+    def schedule(self, f, *args, **kwargs):
+
+        return self.connection.schedule(f, *args, **kwargs)
 
 
 class RabbitmqChannelLayer(BaseChannelLayer):
 
     extensions = ['groups', 'twisted']
+
+    Thread = ConnectionThread
 
     def __init__(self,
                  url,
@@ -455,34 +504,18 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             capacity=capacity,
             channel_capacity=channel_capacity,
         )
-        self.thread = ConnectionThread(url, expiry, group_expiry, capacity,
-                                       channel_capacity)
+        self.thread = self.Thread(url, expiry, group_expiry, capacity,
+                                  channel_capacity)
         self.thread.start()
-
-    # FIXME: Handle queue.Full exception in all method calls blow.
 
     def send(self, channel, message):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.send,
-                channel=channel,
-                message=message,
-                resolve=future,
-            ))
+        future = self.thread.schedule(SEND, channel, message)
         return future.result()
 
     def receive(self, channels, block=False):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.receive,
-                channels=channels,
-                block=block,
-                resolve=future,
-            ))
+        future = self.thread.schedule(RECEIVE, channels, block)
         return future.result()
 
     @defer.inlineCallbacks
@@ -495,82 +528,39 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
             reactor.callFromThread(deferred.callback, future.result())
 
-        future = Future()
+        future = self.thread.schedule(RECEIVE_TWISTED)
         future.add_done_callback(resolve_deferred)
-        self.schedule(
-            partial(
-                self.thread.amqp.receive_twisted,
-                resolve=future,
-            ))
         defer.returnValue((yield deferred))
 
     def new_channel(self, pattern):
 
         assert pattern.endswith('!') or pattern.endswith('?')
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.new_channel,
-                pattern=pattern,
-                resolve=future,
-            ))
+        future = self.thread.schedule(NEW_CHANNEL, pattern)
         return future.result()
 
     def declare_channel(self, channel):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.declare_channel,
-                channel=channel,
-                resolve=future,
-            ))
+        future = self.thread.schedule(DECLARE_CHANNEL, channel)
         return future.result()
 
     def group_add(self, group, channel):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.group_add,
-                group=group,
-                channel=channel,
-                resolve=future,
-            ))
+        future = self.thread.schedule(GROUP_ADD, group, channel)
         return future.result()
 
     def group_discard(self, group, channel):
 
-        future = Future()
-        self.schedule(
-            partial(
-                self.thread.amqp.group_discard,
-                group=group,
-                channel=channel,
-                resolve=future,
-            ))
+        future = self.thread.schedule(GROUP_DISCARD, group, channel)
         return future.result()
 
     def send_group(self, group, message):
 
-        self.schedule(
-            partial(
-                self.thread.amqp.send_group,
-                group=group,
-                message=message,
-            ))
-
-    def schedule(self, f):
-
-        self.thread.calls.put((get_ident(), f))
+        self.thread.schedule(SEND_GROUP, group, message)
 
 
 # TODO: is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with
 # msgpack?  We should minimize useless work on message receive.
-#
-# FIXME: `retry_if_closed` and `propagate_error` not works with nested
-# callbacks.
 
 
 def worker_start_hook(sender, **kwargs):
@@ -588,3 +578,12 @@ def worker_start_hook(sender, **kwargs):
 # FIXME: This must be optional since we don't require channels package
 # to be installed.
 worker_ready.connect(worker_start_hook)
+
+
+class AnyChannel(object):
+
+    def __contains__(self, _):
+        return True
+
+
+any_channel = AnyChannel()

@@ -7,6 +7,7 @@ from itertools import count
 
 import amqpstat
 import django
+import logutil
 import pytest
 from asgi_rabbitmq import RabbitmqChannelLayer
 from channels.asgi import ChannelLayerWrapper
@@ -54,6 +55,7 @@ class DaphneProcess(multiprocessing.Process):
 
     def run(self):
 
+        logutil.setup_logger('Daphne')
         amqpstat.maybe_monkeypatch()
         signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
@@ -67,6 +69,7 @@ class DaphneProcess(multiprocessing.Process):
             channel_layer=channel_layer,
             endpoints=['tcp:port=%d:interface=%s' % (self.port, self.host)],
             signal_handlers=False,
+            action_logger=logutil.ACTION_LOGGER,
         )
         server.run()
 
@@ -83,6 +86,7 @@ class WorkerProcess(multiprocessing.Process):
 
     def run(self):
 
+        logutil.setup_logger('Worker')
         amqpstat.maybe_monkeypatch()
         signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
         django.setup(**{'set_prefix': False} if django.VERSION[1] > 9 else {})
