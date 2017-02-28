@@ -1,3 +1,5 @@
+import base64
+import hashlib
 from functools import partial
 
 import msgpack
@@ -39,7 +41,7 @@ class Protocol(object):
     dead_letters = 'dead-letters'
 
     def __init__(self, expiry, group_expiry, capacity, channel_capacity, ident,
-                 process):
+                 process, crypter):
 
         self.expiry = expiry
         self.group_expiry = group_expiry
@@ -47,7 +49,7 @@ class Protocol(object):
         self.channel_capacity = channel_capacity
         self.ident = ident
         self.process = process
-
+        self.crypter = crypter
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
@@ -382,10 +384,14 @@ class Protocol(object):
     def serialize(self, message):
 
         value = msgpack.packb(message, use_bin_type=True)
+        if self.crypter:
+            value = self.crypter.encrypt(value)
         return value
 
     def deserialize(self, message):
 
+        if self.crypter:
+            message = self.crypter.decrypt(message, self.expiry + 10)
         return msgpack.unpackb(message, encoding='utf8')
 
 
@@ -436,13 +442,15 @@ class RabbitmqConnection(object):
     Connection = LayerConnection
     Protocol = Protocol
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
+                 crypter):
 
         self.url = url
         self.expiry = expiry
         self.group_expiry = group_expiry
         self.capacity = capacity
         self.channel_capacity = channel_capacity
+        self.crypter = crypter
 
         self.protocols = {}
         self.method_calls = queue.Queue()
@@ -481,7 +489,8 @@ class RabbitmqConnection(object):
             self.protocols[ident].apply(*method)
             return
         protocol = self.Protocol(self.expiry, self.group_expiry, self.capacity,
-                                 self.channel_capacity, ident, self.process)
+                                 self.channel_capacity, ident, self.process,
+                                 self.crypter)
         protocol.resolve = future
         amqp_channel = self.connection.channel(
             partial(protocol.register_channel, method),
@@ -528,12 +537,13 @@ class ConnectionThread(Thread):
 
     Connection = RabbitmqConnection
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
+                 crypter):
 
         super(ConnectionThread, self).__init__()
         self.daemon = True
         self.connection = self.Connection(url, expiry, group_expiry, capacity,
-                                          channel_capacity)
+                                          channel_capacity, crypter)
 
     def run(self):
 
@@ -555,7 +565,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                  expiry=60,
                  group_expiry=86400,
                  capacity=100,
-                 channel_capacity=None):
+                 channel_capacity=None,
+                 symmetric_encryption_keys=None):
 
         super(RabbitmqChannelLayer, self).__init__(
             expiry=expiry,
@@ -563,9 +574,27 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             capacity=capacity,
             channel_capacity=channel_capacity,
         )
+        if symmetric_encryption_keys:
+            try:
+                from cryptography.fernet import MultiFernet
+            except ImportError:
+                raise ValueError("Cannot run without 'cryptography' installed")
+            sub_fernets = [
+                self.make_fernet(key) for key in symmetric_encryption_keys
+            ]
+            crypter = MultiFernet(sub_fernets)
+        else:
+            crypter = None
         self.thread = self.Thread(url, expiry, group_expiry, capacity,
-                                  channel_capacity)
+                                  channel_capacity, crypter)
         self.thread.start()
+
+    def make_fernet(self, key):
+
+        from cryptography.fernet import Fernet
+        key = key.encode('utf8')
+        formatted_key = base64.urlsafe_b64encode(hashlib.sha256(key).digest())
+        return Fernet(formatted_key)
 
     def send(self, channel, message):
 

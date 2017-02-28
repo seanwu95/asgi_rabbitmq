@@ -10,6 +10,7 @@ from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
 from channels.worker import Worker
+from msgpack.exceptions import ExtraData
 from pika.exceptions import ConnectionClosed
 
 
@@ -324,3 +325,25 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         self.channel_layer.thread.connection.connection.close()
         with pytest.raises(ConnectionClosed):
             self.channel_layer.send('foo', {'bar': 'baz'})
+
+    def test_message_cryptography(self):
+        """
+        We can encrypt messages.  Layer without crypto keys can't read
+        messages sent with the layer which has one.
+        """
+
+        crypto_layer = RabbitmqChannelLayer(
+            self.rabbitmq_url,
+            expiry=1,
+            group_expiry=2,
+            capacity=self.capacity_limit,
+            symmetric_encryption_keys=['test', 'old'],
+        )
+
+        crypto_layer.send('foo', {'bar': 'baz'})
+        with pytest.raises(ExtraData):
+            self.channel_layer.receive(['foo'])
+        crypto_layer.send('foo', {'bar': 'baz'})
+        channel, message = crypto_layer.receive(['foo'])
+        assert channel == 'foo'
+        assert message == {'bar': 'baz'}
