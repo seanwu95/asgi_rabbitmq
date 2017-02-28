@@ -192,6 +192,30 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         with self.assertRaises(self.channel_layer.ChannelFull):
             self.channel_layer.send(name, {'hey': 'there'})
 
+    def test_per_channel_capacity(self):
+
+        layer = RabbitmqChannelLayer(
+            self.rabbitmq_url,
+            expiry=1,
+            group_expiry=2,
+            capacity=self.capacity_limit,
+            channel_capacity={
+                'http.response!*': 10,
+                'http.request': 30,
+            },
+        )
+        # Test direct match.
+        for _ in range(30):
+            layer.send('http.request', {'hey': 'there'})
+        with pytest.raises(self.channel_layer.ChannelFull):
+            layer.send('http.request', {'hey': 'there'})
+        # Test regexp match.
+        name = layer.new_channel('http.response!')
+        for _ in range(10):
+            layer.send(name, {'hey': 'there'})
+        with pytest.raises(self.channel_layer.ChannelFull):
+            layer.send(name, {'hey': 'there'})
+
     def test_add_reply_channel_to_group(self):
         """
         Reply channel is the most popular candidate for group membership.

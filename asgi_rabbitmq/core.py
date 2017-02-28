@@ -40,13 +40,12 @@ class Protocol(object):
 
     dead_letters = 'dead-letters'
 
-    def __init__(self, expiry, group_expiry, capacity, channel_capacity, ident,
-                 process, crypter):
+    def __init__(self, expiry, group_expiry, get_capacity, ident, process,
+                 crypter):
 
         self.expiry = expiry
         self.group_expiry = group_expiry
-        self.capacity = capacity
-        self.channel_capacity = channel_capacity
+        self.get_capacity = get_capacity
         self.ident = ident
         self.process = process
         self.crypter = crypter
@@ -102,7 +101,7 @@ class Protocol(object):
 
     def publish_message(self, channel, message, method_frame):
 
-        if method_frame.method.message_count >= self.capacity:
+        if method_frame.method.message_count >= self.get_capacity(channel):
             self.resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
             return
         queue = self.get_queue_name(channel)
@@ -442,14 +441,12 @@ class RabbitmqConnection(object):
     Connection = LayerConnection
     Protocol = Protocol
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
-                 crypter):
+    def __init__(self, url, expiry, group_expiry, get_capacity, crypter):
 
         self.url = url
         self.expiry = expiry
         self.group_expiry = group_expiry
-        self.capacity = capacity
-        self.channel_capacity = channel_capacity
+        self.get_capacity = get_capacity
         self.crypter = crypter
 
         self.protocols = {}
@@ -488,8 +485,8 @@ class RabbitmqConnection(object):
             self.protocols[ident].resolve = future
             self.protocols[ident].apply(*method)
             return
-        protocol = self.Protocol(self.expiry, self.group_expiry, self.capacity,
-                                 self.channel_capacity, ident, self.process,
+        protocol = self.Protocol(self.expiry, self.group_expiry,
+                                 self.get_capacity, ident, self.process,
                                  self.crypter)
         protocol.resolve = future
         amqp_channel = self.connection.channel(
@@ -537,13 +534,12 @@ class ConnectionThread(Thread):
 
     Connection = RabbitmqConnection
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity,
-                 crypter):
+    def __init__(self, url, expiry, group_expiry, get_capacity, crypter):
 
         super(ConnectionThread, self).__init__()
         self.daemon = True
-        self.connection = self.Connection(url, expiry, group_expiry, capacity,
-                                          channel_capacity, crypter)
+        self.connection = self.Connection(url, expiry, group_expiry,
+                                          get_capacity, crypter)
 
     def run(self):
 
@@ -585,8 +581,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             crypter = MultiFernet(sub_fernets)
         else:
             crypter = None
-        self.thread = self.Thread(url, expiry, group_expiry, capacity,
-                                  channel_capacity, crypter)
+        self.thread = self.Thread(url, expiry, group_expiry, self.get_capacity,
+                                  crypter)
         self.thread.start()
 
     def make_fernet(self, key):
