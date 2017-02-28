@@ -4,6 +4,7 @@ import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
+from pika.channel import Channel
 from pika.exceptions import ConnectionClosed
 from pika.spec import Basic, BasicProperties
 
@@ -69,6 +70,10 @@ class Protocol(object):
     def apply(self, method_id, args, kwargs):
 
         self.methods[method_id](*args, **kwargs)
+
+    def protocol_error(self, error):
+
+        self.resolve.set_exception(error)
 
     def get_queue_name(self, channel):
 
@@ -384,7 +389,26 @@ class Protocol(object):
         return msgpack.unpackb(message, encoding='utf8')
 
 
+class LayerChannel(Channel):
+
+    def __init__(self, *args, **kwargs):
+
+        self.on_callback_error_callback = None
+        super(LayerChannel, self).__init__(*args, **kwargs)
+
+    def _on_getok(self, method_frame, header_frame, body):
+
+        try:
+            super(LayerChannel, self)._on_getok(method_frame, header_frame,
+                                                body)
+        except Exception as error:
+            if self.on_callback_error_callback:
+                self.on_callback_error_callback(error)
+
+
 class LayerConnection(SelectConnection):
+
+    Channel = LayerChannel
 
     def __init__(self, *args, **kwargs):
 
@@ -400,6 +424,10 @@ class LayerConnection(SelectConnection):
         except Exception as error:
             self.on_callback_error_callback(error)
             raise
+
+    def _create_channel(self, channel_number, on_open_callback):
+
+        return self.Channel(self, channel_number, on_open_callback)
 
 
 class RabbitmqConnection(object):
@@ -455,9 +483,10 @@ class RabbitmqConnection(object):
         protocol = self.Protocol(self.expiry, self.group_expiry, self.capacity,
                                  self.channel_capacity, ident, self.process)
         protocol.resolve = future
-        self.connection.channel(
+        amqp_channel = self.connection.channel(
             partial(protocol.register_channel, method),
         )
+        amqp_channel.on_callback_error_callback = protocol.protocol_error
         # FIXME: possible race condition.
         #
         # Second schedule call was made after we create channel for
