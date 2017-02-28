@@ -398,7 +398,7 @@ class LayerConnection(SelectConnection):
         try:
             return super(LayerConnection, self)._process_callbacks(frame_value)
         except Exception as error:
-            self.on_callback_error_callback(frame_value, error)
+            self.on_callback_error_callback(error)
             raise
 
 
@@ -473,7 +473,7 @@ class RabbitmqConnection(object):
         finally:
             self.connection.ioloop.stop()
 
-    def protocol_error(self, frame_value, error):
+    def protocol_error(self, error):
 
         for protocol in self.protocols.values():
             protocol.resolve.set_exception(error)
