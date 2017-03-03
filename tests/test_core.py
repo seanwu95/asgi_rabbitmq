@@ -49,19 +49,6 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         queues = queue_definitions[self.virtual_host]
         return queues
 
-    def declare_queue(self, name, arguments=None):
-        """Declare queue in current vhost."""
-
-        self.management.post_definitions({
-            'queues': [{
-                'name': name,
-                'vhost': self.virtual_host,
-                'durable': False,
-                'auto_delete': False,
-                'arguments': arguments or {},
-            }],
-        })
-
     channel_layer_cls = RabbitmqChannelLayer
     expiry_delay = 1.1
     capacity_limit = 5
@@ -256,18 +243,18 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     def test_receive_blocking_mode(self):
         """Check we can wait until message arrives and return it."""
 
-        self.declare_queue('foo', {'x-dead-letter-exchange': 'dead-letters'})
+        name = self.channel_layer.new_channel('foo!')
 
         def wait_and_send():
             time.sleep(1)
-            self.channel_layer.send('foo', {'bar': 'baz'})
+            self.channel_layer.send(name, {'bar': 'baz'})
 
         thread = threading.Thread(target=wait_and_send)
         thread.deamon = True
         thread.start()
 
-        channel, message = self.channel_layer.receive(['foo'], block=True)
-        assert channel == 'foo'
+        channel, message = self.channel_layer.receive([name], block=True)
+        assert channel == name
         assert message == {'bar': 'baz'}
 
     def test_send_group_message_expiry(self):
