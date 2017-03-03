@@ -359,6 +359,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         messages sent with the layer which has one.
         """
 
+        name = self.channel_layer.new_channel('foo!')
         crypto_layer = self.channel_layer_cls(
             self.rabbitmq_url,
             expiry=1,
@@ -367,10 +368,10 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
             symmetric_encryption_keys=['test', 'old'],
         )
 
-        crypto_layer.send('foo', {'bar': 'baz'})
+        crypto_layer.send(name, {'bar': 'baz'})
         with pytest.raises(ExtraData):
-            self.channel_layer.receive(['foo'])
-        crypto_layer.send('foo', {'bar': 'baz'})
-        channel, message = crypto_layer.receive(['foo'])
-        assert channel == 'foo'
+            self.channel_layer.receive([name])
+        crypto_layer.send(name, {'bar': 'baz'})
+        channel, message = crypto_layer.receive([name])
+        assert channel == name
         assert message == {'bar': 'baz'}
