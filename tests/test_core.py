@@ -21,7 +21,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
         self.rabbitmq_url = '%s?heartbeat_interval=%d' % (
             rabbitmq_url, self.heartbeat_interval)
-        self.channel_layer = RabbitmqChannelLayer(
+        self.channel_layer = self.channel_layer_cls(
             self.rabbitmq_url,
             expiry=1,
             group_expiry=2,
@@ -62,6 +62,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
             }],
         })
 
+    channel_layer_cls = RabbitmqChannelLayer
     expiry_delay = 1.1
     capacity_limit = 5
     heartbeat_interval = 15
@@ -194,7 +195,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
     def test_per_channel_capacity(self):
 
-        layer = RabbitmqChannelLayer(
+        layer = self.channel_layer_cls(
             self.rabbitmq_url,
             expiry=1,
             group_expiry=2,
@@ -356,7 +357,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         messages sent with the layer which has one.
         """
 
-        crypto_layer = RabbitmqChannelLayer(
+        crypto_layer = self.channel_layer_cls(
             self.rabbitmq_url,
             expiry=1,
             group_expiry=2,
