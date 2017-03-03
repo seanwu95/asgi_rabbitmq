@@ -334,11 +334,12 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         # Wait for connection established.
         while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
+        name = self.channel_layer.new_channel('foo!')
         # Try to call layer send right after connection close frame
         # was sent.
         self.channel_layer.thread.connection.connection.close()
         with pytest.raises(ConnectionClosed):
-            self.channel_layer.send('foo', {'bar': 'baz'})
+            self.channel_layer.send(name, {'bar': 'baz'})
 
     def test_message_cryptography(self):
         """
