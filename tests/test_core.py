@@ -327,13 +327,14 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         # Wait for connection established.
         while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
+        name = self.channel_layer.new_channel('foo!')
         # Close connection and wait for it.
         self.channel_layer.thread.connection.connection.close()
         while not self.channel_layer.thread.connection.connection.is_closed:
             time.sleep(0.5)
         # Look into is_closed check.
         with pytest.raises(ConnectionClosed):
-            self.channel_layer.send('foo', {'bar': 'baz'})
+            self.channel_layer.send(name, {'bar': 'baz'})
 
     def test_resolve_callbacks_during_connection_close(self):
         """
