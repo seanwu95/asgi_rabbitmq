@@ -287,19 +287,20 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         state.
         """
 
-        self.channel_layer.group_add('gr_test', 'ch_test')
+        name = self.channel_layer.new_channel('ch_test!')
+        self.channel_layer.group_add('gr_test', name)
         self.channel_layer.thread.schedule(
             EXPIRE_GROUP_MEMBER,
             'gr_test',
-            'ch_test',
+            name,
         )
         time.sleep(0.1)
         # NOTE: Implementation detail.  Dead letters consumer should
         # ignore messages died with maxlen reason.  This messages
         # caused by sequential group_add calls.
         self.channel_layer.send_group('gr_test', {'value': 'blue'})
-        channel, message = self.channel_layer.receive(['ch_test'])
-        assert channel == 'ch_test'
+        channel, message = self.channel_layer.receive([name])
+        assert channel == name
         assert message == {'value': 'blue'}
 
     def test_connection_on_close_notify_futures(self):
