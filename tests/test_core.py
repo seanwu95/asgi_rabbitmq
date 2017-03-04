@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import pytest
 from asgi_ipc import IPCChannelLayer
-from asgi_rabbitmq import RabbitmqChannelLayer
+from asgi_rabbitmq import RabbitmqChannelLayer, RabbitmqLocalChannelLayer
 from asgi_rabbitmq.core import EXPIRE_GROUP_MEMBER
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
@@ -363,3 +363,50 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         channel, message = crypto_layer.receive([name])
         assert channel == name
         assert message == {'bar': 'baz'}
+
+
+class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
+
+    channel_layer_cls = RabbitmqLocalChannelLayer
+
+    def test_send_normal_channel_to_local_layer(self):
+        """If this is usual channel we must use local channel layer."""
+
+        self.channel_layer.send('foo', {'bar': 'baz'})
+        assert 'foo' not in self.defined_queues
+
+    def test_send_reply_channel_to_rabbitmq_layer(self):
+        """If this is reply channel we must use rabbitmq channel layer."""
+
+        name = self.channel_layer.new_channel('foo!')
+        self.channel_layer.send(name, {'bar': 'baz'})
+        assert name[4:] in self.defined_queues
+
+        name = self.channel_layer.new_channel('foo?')
+        self.channel_layer.send(name, {'bar': 'baz'})
+        assert name[4:] in self.defined_queues
+
+    def test_groups(self):
+        """Tests that basic group addition and send works."""
+
+        self.skip_if_no_extension('groups')
+        name1 = self.channel_layer.new_channel('tg_test!')
+        name2 = self.channel_layer.new_channel('tg_test!')
+        name3 = self.channel_layer.new_channel('tg_test!')
+        # Make a group and send to it
+        self.channel_layer.group_add('tgroup', name1)
+        self.channel_layer.group_add('tgroup', name2)
+        self.channel_layer.group_add('tgroup', name3)
+        self.channel_layer.group_discard('tgroup', name3)
+        self.channel_layer.send_group('tgroup', {'value': 'orange'})
+        # Receive from the two channels in the group and ensure messages
+        channel, message = self.channel_layer.receive([name1])
+        assert channel == name1
+        assert message == {'value': 'orange'}
+        channel, message = self.channel_layer.receive([name2])
+        assert channel == name2
+        assert message == {'value': 'orange'}
+        # Make sure another channel does not get a message
+        channel, message = self.channel_layer.receive([name3])
+        assert channel is None
+        assert message is None
