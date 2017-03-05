@@ -8,37 +8,30 @@ import pytest
 from asgi_ipc import IPCChannelLayer
 from asgi_rabbitmq import RabbitmqChannelLayer, RabbitmqLocalChannelLayer
 from asgi_rabbitmq.core import EXPIRE_GROUP_MEMBER
+from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
 from channels.worker import Worker
+from django.test import SimpleTestCase
 from msgpack.exceptions import ExtraData
 from pika.exceptions import ConnectionClosed
 
 
-class RabbitmqChannelLayerTest(ConformanceTestCase):
+class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
+                               ConformanceTestCase):
 
-    @pytest.fixture(autouse=True)
-    def setup_channel_layer(self, rabbitmq_url):
+    def setUp(self):
 
-        self.rabbitmq_url = '%s?heartbeat_interval=%d' % (
-            rabbitmq_url, self.heartbeat_interval)
+        self.amqp_url = '%s?heartbeat_interval=%d' % (self.amqp_url,
+                                                      self.heartbeat_interval)
         self.channel_layer = self.channel_layer_cls(
-            self.rabbitmq_url,
+            self.amqp_url,
             expiry=1,
             group_expiry=2,
             capacity=self.capacity_limit,
         )
-
-    @pytest.fixture(autouse=True)
-    def setup_virtual_host(self, virtual_host):
-
-        self.virtual_host = virtual_host
-
-    @pytest.fixture(autouse=True)
-    def setup_management(self, management):
-
-        self.management = management
+        super(RabbitmqChannelLayerTest, self).setUp()
 
     @property
     def defined_queues(self):
@@ -185,7 +178,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     def test_per_channel_capacity(self):
 
         layer = self.channel_layer_cls(
-            self.rabbitmq_url,
+            self.amqp_url,
             expiry=1,
             group_expiry=2,
             capacity=self.capacity_limit,
@@ -351,7 +344,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
 
         name = self.channel_layer.new_channel('foo!')
         crypto_layer = self.channel_layer_cls(
-            self.rabbitmq_url,
+            self.amqp_url,
             expiry=1,
             group_expiry=2,
             capacity=self.capacity_limit,
