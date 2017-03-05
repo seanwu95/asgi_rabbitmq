@@ -2,7 +2,6 @@ git+https://github.com/django/asgiref.git#egg=asgiref-1.0.1
 pytest>=3.0
 pytest-django>=3.0
 pytest-pythonpath>=0.7
-rabbitmq-admin>=0.2
 channels>=0.17
 asgi_ipc>=1.2
 requests>=2.12

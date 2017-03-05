@@ -20,6 +20,9 @@ setup(
         'msgpack-python',
         'futures ; python_version < "3.0"',
     ],
+    extras_require={
+        'tests': ['rabbitmq-admin>=0.2'],
+    },
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',
