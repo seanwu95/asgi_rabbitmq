@@ -21,8 +21,8 @@ install:
   - pip install -U pip wheel setuptools
   - pip install -r requirements/qa.txt
   - pip install -r requirements/ci.txt
-  - pip install "${DJANGO_VERSION}"
-  - pip install .
+  - pip install $DJANGO_VERSION
+  - pip install .[tests]
 script:
   - coverage run -m pytest -v -s
 after_success:
