@@ -42,3 +42,8 @@ class IntegrationTest(RabbitmqLayerTestCaseMixin, ChannelLiveServerTestCase):
             proc.terminate()
             proc.wait()
         assert proc.returncode == 0
+
+
+class ConcurrentIntegrationTest(IntegrationTest):
+
+    worker_threads = 4
