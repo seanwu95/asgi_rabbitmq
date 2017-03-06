@@ -2,6 +2,7 @@ from os import environ
 from random import choice
 from string import ascii_letters
 
+from django.conf import settings
 from rabbitmq_admin import AdminAPI
 
 
@@ -16,7 +17,6 @@ class RabbitmqLayerTestCaseMixin(object):
     def _pre_setup(self):
         """Create RabbitMQ virtual host."""
 
-        super(RabbitmqLayerTestCaseMixin, self)._pre_setup()
         hostname = environ.get('RABBITMQ_HOST', 'localhost')
         port = environ.get('RABBITMQ_PORT', '5672')
         user = environ.get('RABBITMQ_USER', 'guest')
@@ -28,10 +28,24 @@ class RabbitmqLayerTestCaseMixin(object):
         self.management = AdminAPI(management_url, (user, password))
         self.management.create_vhost(self.virtual_host)
         self.management.create_user_permission(user, self.virtual_host)
+        # FIXME: Doesn't actually work outside of ChannelLiveServerTestCase.
+        self._overridden_settings = {
+            'CHANNEL_LAYERS': {
+                'default': {
+                    'BACKEND': 'asgi_rabbitmq.RabbitmqChannelLayer',
+                    'ROUTING': settings.CHANNEL_LAYERS['default']['ROUTING'],
+                    'CONFIG': {
+                        'url': self.amqp_url,
+                    },
+                },
+            },
+        }
+        super(RabbitmqLayerTestCaseMixin, self)._pre_setup()
 
     def _post_teardown(self):
         """Remove RabbitMQ virtual host."""
 
+        self._overridden_settings = None
         self.management.delete_vhost(self.virtual_host)
         del self.virtual_host
         del self.amqp_url
