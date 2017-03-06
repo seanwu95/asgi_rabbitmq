@@ -5,39 +5,40 @@ import time
 import benchmark
 import requests
 import websocket
+from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
+from channels.test import ChannelLiveServerTestCase
 
 
-def test_http_request(asgi_server):
-    """Test the ability to send http requests and receive responses."""
+class IntegrationTest(RabbitmqLayerTestCaseMixin, ChannelLiveServerTestCase):
 
-    url = 'http://%s:%d/' % asgi_server
-    response = requests.get(url)
-    assert response.status_code == 404
+    def test_http_request(self):
+        """Test the ability to send http requests and receive responses."""
 
+        response = requests.get(self.live_server_url)
+        assert response.status_code == 404
 
-def test_websocket_message(asgi_server):
-    """Test the ability to send and receive messages over WebSocket."""
+    def test_websocket_message(self):
+        """Test the ability to send and receive messages over WebSocket."""
 
-    url = 'ws://%s:%d/' % asgi_server
-    ws = websocket.create_connection(url)
-    ws.send('test')
-    response = ws.recv()
-    ws.close()
-    assert 'test' == response
+        ws = websocket.create_connection(self.live_server_ws_url)
+        ws.send('test')
+        response = ws.recv()
+        ws.close()
+        assert 'test' == response
 
+    def test_benchmark(self):
+        """Run channels benchmark test suite."""
 
-def test_benchmark(asgi_server):
-
-    proc = subprocess.Popen([
-        sys.executable,
-        benchmark.__file__,
-        'ws://%s:%d' % asgi_server,
-    ])
-    for _ in range(0, 90, 5):
-        time.sleep(5)
-        if proc.returncode:
-            break
-    else:
-        proc.terminate()
-        proc.wait()
-    assert proc.returncode == 0
+        proc = subprocess.Popen([
+            sys.executable,
+            benchmark.__file__,
+            self.live_server_ws_url,
+        ])
+        for _ in range(0, 90, 5):
+            time.sleep(5)
+            if proc.returncode:
+                break
+        else:
+            proc.terminate()
+            proc.wait()
+        assert proc.returncode == 0
