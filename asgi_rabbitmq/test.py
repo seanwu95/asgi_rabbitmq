@@ -2,6 +2,7 @@ from os import environ
 from random import choice
 from string import ascii_letters
 
+from channels.asgi import channel_layers
 from django.conf import settings
 from rabbitmq_admin import AdminAPI
 
@@ -40,6 +41,7 @@ class RabbitmqLayerTestCaseMixin(object):
                 },
             },
         }
+        channel_layers.backends = {}  # NOTE: Cleanup backend cache.
         super(RabbitmqLayerTestCaseMixin, self)._pre_setup()
 
     def _post_teardown(self):
