@@ -1,41 +1,37 @@
+from __future__ import unicode_literals
+
 import threading
 import time
 from collections import defaultdict
 
 import pytest
 from asgi_ipc import IPCChannelLayer
-from asgi_rabbitmq import RabbitmqChannelLayer
+from asgi_rabbitmq import RabbitmqChannelLayer, RabbitmqLocalChannelLayer
 from asgi_rabbitmq.core import EXPIRE_GROUP_MEMBER
+from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
 from channels.worker import Worker
+from django.test import SimpleTestCase
+from msgpack.exceptions import ExtraData
 from pika.exceptions import ConnectionClosed
 
 
-class RabbitmqChannelLayerTest(ConformanceTestCase):
+class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
+                               ConformanceTestCase):
 
-    @pytest.fixture(autouse=True)
-    def setup_channel_layer(self, rabbitmq_url):
+    def setUp(self):
 
-        self.rabbitmq_url = '%s?heartbeat_interval=%d' % (
-            rabbitmq_url, self.heartbeat_interval)
-        self.channel_layer = RabbitmqChannelLayer(
-            self.rabbitmq_url,
+        self.amqp_url = '%s?heartbeat_interval=%d' % (self.amqp_url,
+                                                      self.heartbeat_interval)
+        self.channel_layer = self.channel_layer_cls(
+            self.amqp_url,
             expiry=1,
             group_expiry=2,
             capacity=self.capacity_limit,
         )
-
-    @pytest.fixture(autouse=True)
-    def setup_virtual_host(self, virtual_host):
-
-        self.virtual_host = virtual_host
-
-    @pytest.fixture(autouse=True)
-    def setup_management(self, management):
-
-        self.management = management
+        super(RabbitmqChannelLayerTest, self).setUp()
 
     @property
     def defined_queues(self):
@@ -48,19 +44,7 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         queues = queue_definitions[self.virtual_host]
         return queues
 
-    def declare_queue(self, name, arguments=None):
-        """Declare queue in current vhost."""
-
-        self.management.post_definitions({
-            'queues': [{
-                'name': name,
-                'vhost': self.virtual_host,
-                'durable': False,
-                'auto_delete': False,
-                'arguments': arguments or {},
-            }],
-        })
-
+    channel_layer_cls = RabbitmqChannelLayer
     expiry_delay = 1.1
     capacity_limit = 5
     heartbeat_interval = 15
@@ -191,6 +175,30 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         with self.assertRaises(self.channel_layer.ChannelFull):
             self.channel_layer.send(name, {'hey': 'there'})
 
+    def test_per_channel_capacity(self):
+
+        layer = self.channel_layer_cls(
+            self.amqp_url,
+            expiry=1,
+            group_expiry=2,
+            capacity=self.capacity_limit,
+            channel_capacity={
+                'http.response!*': 10,
+                'http.request': 30,
+            },
+        )
+        # Test direct match.
+        for _ in range(30):
+            layer.send('http.request', {'hey': 'there'})
+        with pytest.raises(self.channel_layer.ChannelFull):
+            layer.send('http.request', {'hey': 'there'})
+        # Test regexp match.
+        name = layer.new_channel('http.response!')
+        for _ in range(10):
+            layer.send(name, {'hey': 'there'})
+        with pytest.raises(self.channel_layer.ChannelFull):
+            layer.send(name, {'hey': 'there'})
+
     def test_add_reply_channel_to_group(self):
         """
         Reply channel is the most popular candidate for group membership.
@@ -230,18 +238,18 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
     def test_receive_blocking_mode(self):
         """Check we can wait until message arrives and return it."""
 
-        self.declare_queue('foo', {'x-dead-letter-exchange': 'dead-letters'})
+        name = self.channel_layer.new_channel('foo!')
 
         def wait_and_send():
             time.sleep(1)
-            self.channel_layer.send('foo', {'bar': 'baz'})
+            self.channel_layer.send(name, {'bar': 'baz'})
 
         thread = threading.Thread(target=wait_and_send)
         thread.deamon = True
         thread.start()
 
-        channel, message = self.channel_layer.receive(['foo'], block=True)
-        assert channel == 'foo'
+        channel, message = self.channel_layer.receive([name], block=True)
+        assert channel == name
         assert message == {'bar': 'baz'}
 
     def test_send_group_message_expiry(self):
@@ -261,19 +269,20 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         state.
         """
 
-        self.channel_layer.group_add('gr_test', 'ch_test')
+        name = self.channel_layer.new_channel('ch_test!')
+        self.channel_layer.group_add('gr_test', name)
         self.channel_layer.thread.schedule(
             EXPIRE_GROUP_MEMBER,
             'gr_test',
-            'ch_test',
+            name,
         )
         time.sleep(0.1)
         # NOTE: Implementation detail.  Dead letters consumer should
         # ignore messages died with maxlen reason.  This messages
         # caused by sequential group_add calls.
         self.channel_layer.send_group('gr_test', {'value': 'blue'})
-        channel, message = self.channel_layer.receive(['ch_test'])
-        assert channel == 'ch_test'
+        channel, message = self.channel_layer.receive([name])
+        assert channel == name
         assert message == {'value': 'blue'}
 
     def test_connection_on_close_notify_futures(self):
@@ -301,13 +310,14 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         # Wait for connection established.
         while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
+        name = self.channel_layer.new_channel('foo!')
         # Close connection and wait for it.
         self.channel_layer.thread.connection.connection.close()
         while not self.channel_layer.thread.connection.connection.is_closed:
             time.sleep(0.5)
         # Look into is_closed check.
         with pytest.raises(ConnectionClosed):
-            self.channel_layer.send('foo', {'bar': 'baz'})
+            self.channel_layer.send(name, {'bar': 'baz'})
 
     def test_resolve_callbacks_during_connection_close(self):
         """
@@ -319,8 +329,79 @@ class RabbitmqChannelLayerTest(ConformanceTestCase):
         # Wait for connection established.
         while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
+        name = self.channel_layer.new_channel('foo!')
         # Try to call layer send right after connection close frame
         # was sent.
         self.channel_layer.thread.connection.connection.close()
         with pytest.raises(ConnectionClosed):
-            self.channel_layer.send('foo', {'bar': 'baz'})
+            self.channel_layer.send(name, {'bar': 'baz'})
+
+    def test_message_cryptography(self):
+        """
+        We can encrypt messages.  Layer without crypto keys can't read
+        messages sent with the layer which has one.
+        """
+
+        name = self.channel_layer.new_channel('foo!')
+        crypto_layer = self.channel_layer_cls(
+            self.amqp_url,
+            expiry=1,
+            group_expiry=2,
+            capacity=self.capacity_limit,
+            symmetric_encryption_keys=['test', 'old'],
+        )
+
+        crypto_layer.send(name, {'bar': 'baz'})
+        with pytest.raises(ExtraData):
+            self.channel_layer.receive([name])
+        crypto_layer.send(name, {'bar': 'baz'})
+        channel, message = crypto_layer.receive([name])
+        assert channel == name
+        assert message == {'bar': 'baz'}
+
+
+class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
+
+    channel_layer_cls = RabbitmqLocalChannelLayer
+
+    def test_send_normal_channel_to_local_layer(self):
+        """If this is usual channel we must use local channel layer."""
+
+        self.channel_layer.send('foo', {'bar': 'baz'})
+        assert 'foo' not in self.defined_queues
+
+    def test_send_reply_channel_to_rabbitmq_layer(self):
+        """If this is reply channel we must use rabbitmq channel layer."""
+
+        name = self.channel_layer.new_channel('foo!')
+        self.channel_layer.send(name, {'bar': 'baz'})
+        assert name[4:] in self.defined_queues
+
+        name = self.channel_layer.new_channel('foo?')
+        self.channel_layer.send(name, {'bar': 'baz'})
+        assert name[4:] in self.defined_queues
+
+    def test_groups(self):
+        """Tests that basic group addition and send works."""
+
+        self.skip_if_no_extension('groups')
+        name1 = self.channel_layer.new_channel('tg_test!')
+        name2 = self.channel_layer.new_channel('tg_test!')
+        name3 = self.channel_layer.new_channel('tg_test!')
+        # Make a group and send to it
+        self.channel_layer.group_add('tgroup', name1)
+        self.channel_layer.group_add('tgroup', name2)
+        self.channel_layer.group_add('tgroup', name3)
+        self.channel_layer.group_discard('tgroup', name3)
+        self.channel_layer.send_group('tgroup', {'value': 'orange'})
+        # Receive from the two channels in the group and ensure messages
+        channel, message = self.channel_layer.receive([name1])
+        assert channel == name1
+        assert message == {'value': 'orange'}
+        channel, message = self.channel_layer.receive([name2])
+        assert channel == name2
+        assert message == {'value': 'orange'}
+        # Make sure another channel does not get a message
+        channel, message = self.channel_layer.receive([name3])
+        assert channel is None
+        assert message is None

@@ -1,3 +1,4 @@
 from .core import RabbitmqChannelLayer
+from .local import RabbitmqLocalChannelLayer
 
-__all__ = ['RabbitmqChannelLayer']
+__all__ = ['RabbitmqChannelLayer', 'RabbitmqLocalChannelLayer']

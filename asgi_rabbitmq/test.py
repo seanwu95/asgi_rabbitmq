@@ -1,0 +1,60 @@
+from os import environ
+from random import choice
+from string import ascii_letters
+
+from channels.asgi import channel_layers
+from django.conf import settings
+from django.test.utils import override_settings
+from rabbitmq_admin import AdminAPI
+
+
+class RabbitmqLayerTestCaseMixin(object):
+    """
+    TestCase mixin for Django tests.
+
+    Allow to test your channels project against real broker.  Provide
+    isolated virtual host for each test.
+    """
+
+    def _pre_setup(self):
+        """Create RabbitMQ virtual host."""
+
+        hostname = environ.get('RABBITMQ_HOST', 'localhost')
+        port = environ.get('RABBITMQ_PORT', '5672')
+        user = environ.get('RABBITMQ_USER', 'guest')
+        password = environ.get('RABBITMQ_PASSWORD', 'guest')
+        management_port = environ.get('RABBITMQ_MANAGEMENT_PORT', '15672')
+        management_url = 'http://%s:%s' % (hostname, management_port)
+        self.virtual_host = ''.join(choice(ascii_letters) for i in range(8))
+        self.amqp_url = 'amqp://%s:%s/%s' % (hostname, port, self.virtual_host)
+        self.management = AdminAPI(management_url, (user, password))
+        self.management.create_vhost(self.virtual_host)
+        self.management.create_user_permission(user, self.virtual_host)
+        self._overridden_settings = {
+            'CHANNEL_LAYERS': {
+                'default': {
+                    'BACKEND': 'asgi_rabbitmq.RabbitmqChannelLayer',
+                    'ROUTING': settings.CHANNEL_LAYERS['default']['ROUTING'],
+                    'CONFIG': {
+                        'url': self.amqp_url,
+                    },
+                },
+            },
+        }
+        self._self_overridden_context = override_settings(
+            **self._overridden_settings)
+        self._self_overridden_context.enable()
+        channel_layers.backends = {}  # NOTE: Cleanup backend cache.
+        super(RabbitmqLayerTestCaseMixin, self)._pre_setup()
+
+    def _post_teardown(self):
+        """Remove RabbitMQ virtual host."""
+
+        self._self_overridden_context.disable()
+        delattr(self, '_self_overridden_context')
+        self._overridden_settings = None
+        self.management.delete_vhost(self.virtual_host)
+        del self.virtual_host
+        del self.amqp_url
+        del self.management
+        super(RabbitmqLayerTestCaseMixin, self)._post_teardown()

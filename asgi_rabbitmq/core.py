@@ -1,9 +1,12 @@
+import base64
+import hashlib
 from functools import partial
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
+from pika.channel import Channel
 from pika.exceptions import ConnectionClosed
 from pika.spec import Basic, BasicProperties
 
@@ -32,16 +35,15 @@ class Protocol(object):
 
     dead_letters = 'dead-letters'
 
-    def __init__(self, expiry, group_expiry, capacity, channel_capacity, ident,
-                 process):
+    def __init__(self, expiry, group_expiry, get_capacity, ident, process,
+                 crypter):
 
         self.expiry = expiry
         self.group_expiry = group_expiry
-        self.capacity = capacity
-        self.channel_capacity = channel_capacity
+        self.get_capacity = get_capacity
         self.ident = ident
         self.process = process
-
+        self.crypter = crypter
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
@@ -64,6 +66,10 @@ class Protocol(object):
     def apply(self, method_id, args, kwargs):
 
         self.methods[method_id](*args, **kwargs)
+
+    def protocol_error(self, error):
+
+        self.resolve.set_exception(error)
 
     def get_queue_name(self, channel):
 
@@ -90,7 +96,7 @@ class Protocol(object):
 
     def publish_message(self, channel, message, method_frame):
 
-        if method_frame.method.message_count >= self.capacity:
+        if method_frame.method.message_count >= self.get_capacity(channel):
             self.resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
             return
         queue = self.get_queue_name(channel)
@@ -372,14 +378,37 @@ class Protocol(object):
     def serialize(self, message):
 
         value = msgpack.packb(message, use_bin_type=True)
+        if self.crypter:
+            value = self.crypter.encrypt(value)
         return value
 
     def deserialize(self, message):
 
+        if self.crypter:
+            message = self.crypter.decrypt(message, self.expiry + 10)
         return msgpack.unpackb(message, encoding='utf8')
 
 
+class LayerChannel(Channel):
+
+    def __init__(self, *args, **kwargs):
+
+        self.on_callback_error_callback = None
+        super(LayerChannel, self).__init__(*args, **kwargs)
+
+    def _on_getok(self, method_frame, header_frame, body):
+
+        try:
+            super(LayerChannel, self)._on_getok(method_frame, header_frame,
+                                                body)
+        except Exception as error:
+            if self.on_callback_error_callback:
+                self.on_callback_error_callback(error)
+
+
 class LayerConnection(SelectConnection):
+
+    Channel = LayerChannel
 
     def __init__(self, *args, **kwargs):
 
@@ -393,8 +422,12 @@ class LayerConnection(SelectConnection):
         try:
             return super(LayerConnection, self)._process_callbacks(frame_value)
         except Exception as error:
-            self.on_callback_error_callback(frame_value, error)
+            self.on_callback_error_callback(error)
             raise
+
+    def _create_channel(self, channel_number, on_open_callback):
+
+        return self.Channel(self, channel_number, on_open_callback)
 
 
 class RabbitmqConnection(object):
@@ -403,13 +436,13 @@ class RabbitmqConnection(object):
     Connection = LayerConnection
     Protocol = Protocol
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+    def __init__(self, url, expiry, group_expiry, get_capacity, crypter):
 
         self.url = url
         self.expiry = expiry
         self.group_expiry = group_expiry
-        self.capacity = capacity
-        self.channel_capacity = channel_capacity
+        self.get_capacity = get_capacity
+        self.crypter = crypter
 
         self.protocols = {}
         self.lock = Lock()
@@ -439,12 +472,14 @@ class RabbitmqConnection(object):
             self.protocols[ident].resolve = future
             self.protocols[ident].apply(*method)
             return
-        protocol = self.Protocol(self.expiry, self.group_expiry, self.capacity,
-                                 self.channel_capacity, ident, self.process)
+        protocol = self.Protocol(self.expiry, self.group_expiry,
+                                 self.get_capacity, ident, self.process,
+                                 self.crypter)
         protocol.resolve = future
-        self.connection.channel(
+        amqp_channel = self.connection.channel(
             partial(protocol.register_channel, method),
         )
+        amqp_channel.on_callback_error_callback = protocol.protocol_error
         # FIXME: possible race condition.
         #
         # Second schedule call was made after we create channel for
@@ -460,7 +495,7 @@ class RabbitmqConnection(object):
         finally:
             self.connection.ioloop.stop()
 
-    def protocol_error(self, frame_value, error):
+    def protocol_error(self, error):
 
         for protocol in self.protocols.values():
             protocol.resolve.set_exception(error)
@@ -484,12 +519,12 @@ class ConnectionThread(Thread):
 
     Connection = RabbitmqConnection
 
-    def __init__(self, url, expiry, group_expiry, capacity, channel_capacity):
+    def __init__(self, url, expiry, group_expiry, get_capacity, crypter):
 
         super(ConnectionThread, self).__init__()
         self.daemon = True
-        self.connection = self.Connection(url, expiry, group_expiry, capacity,
-                                          channel_capacity)
+        self.connection = self.Connection(url, expiry, group_expiry,
+                                          get_capacity, crypter)
 
     def run(self):
 
@@ -511,7 +546,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
                  expiry=60,
                  group_expiry=86400,
                  capacity=100,
-                 channel_capacity=None):
+                 channel_capacity=None,
+                 symmetric_encryption_keys=None):
 
         super(RabbitmqChannelLayer, self).__init__(
             expiry=expiry,
@@ -519,9 +555,27 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             capacity=capacity,
             channel_capacity=channel_capacity,
         )
-        self.thread = self.Thread(url, expiry, group_expiry, capacity,
-                                  channel_capacity)
+        if symmetric_encryption_keys:
+            try:
+                from cryptography.fernet import MultiFernet
+            except ImportError:
+                raise ValueError("Cannot run without 'cryptography' installed")
+            sub_fernets = [
+                self.make_fernet(key) for key in symmetric_encryption_keys
+            ]
+            crypter = MultiFernet(sub_fernets)
+        else:
+            crypter = None
+        self.thread = self.Thread(url, expiry, group_expiry, self.get_capacity,
+                                  crypter)
         self.thread.start()
+
+    def make_fernet(self, key):
+
+        from cryptography.fernet import Fernet
+        key = key.encode('utf8')
+        formatted_key = base64.urlsafe_b64encode(hashlib.sha256(key).digest())
+        return Fernet(formatted_key)
 
     def send(self, channel, message):
 
