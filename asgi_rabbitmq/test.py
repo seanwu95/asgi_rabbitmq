@@ -44,7 +44,6 @@ class RabbitmqLayerTestCaseMixin(object):
         self._self_overridden_context = override_settings(
             **self._overridden_settings)
         self._self_overridden_context.enable()
-        channel_layers.backends = {}  # NOTE: Cleanup backend cache.
         super(RabbitmqLayerTestCaseMixin, self)._pre_setup()
 
     def _post_teardown(self):
