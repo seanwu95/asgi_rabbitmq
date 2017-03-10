@@ -2,7 +2,6 @@ from os import environ
 from random import choice
 from string import ascii_letters
 
-from channels.asgi import channel_layers
 from django.conf import settings
 from django.test.utils import override_settings
 from rabbitmq_admin import AdminAPI
