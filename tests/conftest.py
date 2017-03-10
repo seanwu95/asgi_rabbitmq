@@ -13,7 +13,7 @@ except AttributeError:
 def statistics(statdir):
     """Print benchmark statistics table."""
 
-    amqpstat.maybe_monkeypatch()
+    amqpstat.maybe_monkeypatch(statdir)
     yield
     amqpstat.maybe_print_stats(statdir)
 
