@@ -4,13 +4,16 @@ import glob
 import json
 import os
 import random
+import signal
 import statistics
 import time
-from functools import wraps
+from functools import partial, wraps
 from operator import itemgetter
 
 import asgi_rabbitmq
-from pika.channel import Channel
+import logutil
+from channels.test.liveserver import (ChannelLiveServerTestCase, DaphneProcess,
+                                      WorkerProcess)
 from pika.spec import Basic
 from tabulate import tabulate
 
@@ -21,10 +24,10 @@ consumers = {}
 BENCHMARK = os.environ.get('BENCHMARK', 'False') == 'True'
 
 
-def maybe_monkeypatch():
+def maybe_monkeypatch(todir):
 
     if BENCHMARK:
-        monkeypatch_all()
+        monkeypatch_all(todir)
 
 
 def maybe_print_stats(fromdir):
@@ -33,9 +36,10 @@ def maybe_print_stats(fromdir):
         print_stats(fromdir)
 
 
-def monkeypatch_all():
+def monkeypatch_all(todir):
     monkeypatch_connection()
     monkeypatch_layer()
+    monkeypatch_test_case(todir)
 
 
 def monkeypatch_connection():
@@ -52,6 +56,14 @@ def monkeypatch_layer():
     layer.group_add = bench(layer.group_add)
     layer.group_discard = bench(layer.group_discard)
     layer.send_group = bench(layer.send_group, count=True)
+
+
+def monkeypatch_test_case(todir):
+
+    case = ChannelLiveServerTestCase
+    case.ProtocolServerProcess = partial(DebugDaphneProcess, todir)
+    case.WorkerProcess = partial(DebugWorkerProcess, todir)
+    case._post_teardown = signal_first(case._post_teardown)
 
 
 def percentile(values, fraction):
@@ -220,3 +232,51 @@ class DebugChannel(asgi_rabbitmq.core.LayerConnection.Channel):
     def queue_declare(self, callback, *args, **kwargs):
         return super(DebugChannel, self).queue_declare(
             wrap('queue_declare', callback), *args, **kwargs)
+
+
+class DebugDaphneProcess(DaphneProcess):
+
+    def __init__(self, todir, *args):
+
+        self.todir = todir
+        super(DebugDaphneProcess, self).__init__(*args)
+
+    def run(self):
+
+        logutil.setup_logger('Daphne')
+        monkeypatch_all(self.todir)
+        signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
+        super(DebugDaphneProcess, self).run()
+
+
+class DebugWorkerProcess(WorkerProcess):
+
+    def __init__(self, todir, *args):
+
+        self.todir = todir
+        super(DebugWorkerProcess, self).__init__(*args)
+
+    def run(self):
+
+        logutil.setup_logger('Worker')
+        monkeypatch_all(self.todir)
+        signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
+        super(DebugWorkerProcess, self).run()
+
+
+def signal_first(method):
+
+    def decorated_method(self):
+
+        os.kill(self._server_process.pid, signal.SIGCHLD)
+        os.kill(self._worker_process.pid, signal.SIGCHLD)
+        time.sleep(0.1)
+        method(self)
+
+    return decorated_method
+
+
+def at_exit(todir, signum, frame):
+
+    if BENCHMARK:
+        save_stats(todir)
