@@ -16,9 +16,9 @@ except ImportError:
     from futures import Future
 
 try:
-    from threading import Thread, Lock, get_ident
+    from threading import Thread, Lock, Event, get_ident
 except ImportError:
-    from threading import Thread, Lock, _get_ident as get_ident
+    from threading import Thread, Lock, Event, _get_ident as get_ident
 
 SEND = 0
 RECEIVE = 1
@@ -415,7 +415,13 @@ class LayerConnection(SelectConnection):
         self.on_callback_error_callback = kwargs.pop(
             'on_callback_error_callback',
         )
+        self.lock = kwargs.pop('lock')
         super(LayerConnection, self).__init__(*args, **kwargs)
+
+    def _process_frame(self, frame_value):
+
+        with self.lock:
+            return super(LayerConnection, self)._process_frame(frame_value)
 
     def _process_callbacks(self, frame_value):
 
@@ -446,7 +452,7 @@ class RabbitmqConnection(object):
 
         self.protocols = {}
         self.lock = Lock()
-        self.lock.acquire()
+        self.is_open = Event()
         self.parameters = self.Parameters(self.url)
         self.connection = self.Connection(
             parameters=self.parameters,
@@ -454,6 +460,7 @@ class RabbitmqConnection(object):
             on_close_callback=self.notify_futures,
             on_callback_error_callback=self.protocol_error,
             stop_ioloop_on_close=False,
+            lock=self.lock,
         )
 
     def run(self):
@@ -462,8 +469,8 @@ class RabbitmqConnection(object):
 
     def start_loop(self, connection):
 
+        self.is_open.set()
         self.process(None, (DECLARE_DEAD_LETTERS, (), {}), Future())
-        self.lock.release()
 
     def process(self, ident, method, future):
 
@@ -504,6 +511,7 @@ class RabbitmqConnection(object):
 
         if self.connection.is_closing or self.connection.is_closed:
             raise ConnectionClosed
+        self.is_open.wait()
         future = Future()
         with self.lock:
             self.process(get_ident(), (f, args, kwargs), future)
