@@ -16,14 +16,9 @@ except ImportError:
     from futures import Future
 
 try:
-    from threading import Thread, get_ident
+    from threading import Thread, Lock, Event, get_ident
 except ImportError:
-    from threading import Thread, _get_ident as get_ident
-
-try:
-    import queue
-except ImportError:
-    import Queue as queue
+    from threading import Thread, Lock, Event, _get_ident as get_ident
 
 SEND = 0
 RECEIVE = 1
@@ -420,7 +415,13 @@ class LayerConnection(SelectConnection):
         self.on_callback_error_callback = kwargs.pop(
             'on_callback_error_callback',
         )
+        self.lock = kwargs.pop('lock')
         super(LayerConnection, self).__init__(*args, **kwargs)
+
+    def _process_frame(self, frame_value):
+
+        with self.lock:
+            return super(LayerConnection, self)._process_frame(frame_value)
 
     def _process_callbacks(self, frame_value):
 
@@ -450,7 +451,8 @@ class RabbitmqConnection(object):
         self.crypter = crypter
 
         self.protocols = {}
-        self.method_calls = queue.Queue()
+        self.lock = Lock()
+        self.is_open = Event()
         self.parameters = self.Parameters(self.url)
         self.connection = self.Connection(
             parameters=self.parameters,
@@ -458,6 +460,7 @@ class RabbitmqConnection(object):
             on_close_callback=self.notify_futures,
             on_callback_error_callback=self.protocol_error,
             stop_ioloop_on_close=False,
+            lock=self.lock,
         )
 
     def run(self):
@@ -466,17 +469,8 @@ class RabbitmqConnection(object):
 
     def start_loop(self, connection):
 
-        self.method_calls.put((None, (DECLARE_DEAD_LETTERS, (), {}), Future()))
-        self.check_method_call()
-
-    def check_method_call(self):
-
-        try:
-            ident, method, future = self.method_calls.get_nowait()
-            self.process(ident, method, future)
-        except queue.Empty:
-            pass
-        self.connection.add_timeout(0.01, self.check_method_call)
+        self.is_open.set()
+        self.process(None, (DECLARE_DEAD_LETTERS, (), {}), Future())
 
     def process(self, ident, method, future):
 
@@ -517,11 +511,10 @@ class RabbitmqConnection(object):
 
         if self.connection.is_closing or self.connection.is_closed:
             raise ConnectionClosed
+        self.is_open.wait()
         future = Future()
-        # TODO: is this timer based queue polling is necessary at all?!
-        #
-        # Maybe threading.Lock will be enough.
-        self.method_calls.put((get_ident(), (f, args, kwargs), future))
+        with self.lock:
+            self.process(get_ident(), (f, args, kwargs), future)
         return future
 
 
