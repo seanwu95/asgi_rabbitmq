@@ -15,7 +15,7 @@ class IntegrationTest(RabbitmqLayerTestCaseMixin, ChannelLiveServerTestCase):
         """Test the ability to send http requests and receive responses."""
 
         response = requests.get(self.live_server_url)
-        assert response.status_code == 404
+        assert response.status_code == 200
 
     def test_websocket_message(self):
         """Test the ability to send and receive messages over WebSocket."""

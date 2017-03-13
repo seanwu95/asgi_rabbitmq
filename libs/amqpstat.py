@@ -2,26 +2,31 @@ from __future__ import print_function
 
 import glob
 import json
+import logging
 import os
 import random
 import signal
 import statistics
+import sys
 import time
 from functools import partial, wraps
 from operator import itemgetter
 
 import asgi_rabbitmq
-import logutil
 from channels.test.liveserver import (ChannelLiveServerTestCase, DaphneProcess,
                                       WorkerProcess)
+from daphne.access import AccessLogGenerator
+from daphne.server import Server
 from pika.spec import Basic
 from tabulate import tabulate
+from twisted.python.log import PythonLoggingObserver
 
 amqp_stats = {}
 layer_stats = {}
 consumers = {}
 
 BENCHMARK = os.environ.get('BENCHMARK', 'False') == 'True'
+DEBUGLOG = os.environ.get('DEBUGLOG', 'False') == 'True'
 
 
 def maybe_monkeypatch(todir):
@@ -37,6 +42,7 @@ def maybe_print_stats(fromdir):
 
 
 def monkeypatch_all(todir):
+
     monkeypatch_connection()
     monkeypatch_layer()
     monkeypatch_test_case(todir)
@@ -70,6 +76,7 @@ def percentile(values, fraction):
     """
     Returns a percentile value (e.g. fraction = 0.95 -> 95th percentile)
     """
+
     values = sorted(values)
     stopat = int(len(values) * fraction)
     if stopat == len(values):
@@ -78,6 +85,7 @@ def percentile(values, fraction):
 
 
 def print_stats(fromdir):
+
     for statfile in glob.glob('%s/*.dump' % fromdir):
         with open(statfile) as f:
             statblob = f.read()
@@ -173,11 +181,13 @@ class DebugChannel(asgi_rabbitmq.core.LayerConnection.Channel):
     """Collect statistics about RabbitMQ methods usage on channel."""
 
     def basic_ack(self, *args, **kwargs):
+
         amqp_stats.setdefault('basic_ack', 0)
         amqp_stats['basic_ack'] += 1
         return super(DebugChannel, self).basic_ack(*args, **kwargs)
 
     def basic_cancel(self, callback=None, *args, **kwargs):
+
         return super(DebugChannel, self).basic_cancel(
             wrap('basic_cancel', callback), *args, **kwargs)
 
@@ -200,36 +210,44 @@ class DebugChannel(asgi_rabbitmq.core.LayerConnection.Channel):
         return super(DebugChannel, self)._on_eventok(method_frame)
 
     def basic_get(self, callback=None, *args, **kwargs):
+
         # TODO: Measure latency for Get-Empty responses.
         return super(DebugChannel, self).basic_get(
             wrap('basic_get', callback), *args, **kwargs)
 
     def basic_publish(self, *args, **kwargs):
+
         amqp_stats.setdefault('basic_publish', 0)
         amqp_stats['basic_publish'] += 1
         return super(DebugChannel, self).basic_publish(*args, **kwargs)
 
     def exchange_bind(self, callback=None, *args, **kwargs):
+
         return super(DebugChannel, self).exchange_bind(
             wrap('exchange_bind', callback), *args, **kwargs)
 
     def exchange_declare(self, callback=None, *args, **kwargs):
+
         return super(DebugChannel, self).exchange_declare(
             wrap('exchange_declare', callback), *args, **kwargs)
 
     def exchange_delete(self, callback=None, *args, **kwargs):
+
         return super(DebugChannel, self).exchange_delete(
             wrap('exchange_delete', callback), *args, **kwargs)
 
     def exchange_unbind(self, callback=None, *args, **kwargs):
+
         return super(DebugChannel, self).exchange_unbind(
             wrap('exchange_unbind', callback), *args, **kwargs)
 
     def queue_bind(self, callback, *args, **kwargs):
+
         return super(DebugChannel, self).queue_bind(
             wrap('queue_bind', callback), *args, **kwargs)
 
     def queue_declare(self, callback, *args, **kwargs):
+
         return super(DebugChannel, self).queue_declare(
             wrap('queue_declare', callback), *args, **kwargs)
 
@@ -243,7 +261,7 @@ class DebugDaphneProcess(DaphneProcess):
 
     def run(self):
 
-        logutil.setup_logger('Daphne')
+        setup_logger('Daphne')
         monkeypatch_all(self.todir)
         signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
         super(DebugDaphneProcess, self).run()
@@ -258,7 +276,7 @@ class DebugWorkerProcess(WorkerProcess):
 
     def run(self):
 
-        logutil.setup_logger('Worker')
+        setup_logger('Worker')
         monkeypatch_all(self.todir)
         signal.signal(signal.SIGCHLD, partial(at_exit, self.todir))
         super(DebugWorkerProcess, self).run()
@@ -280,3 +298,20 @@ def at_exit(todir, signum, frame):
 
     if BENCHMARK:
         save_stats(todir)
+
+
+def setup_logger(name):
+
+    if DEBUGLOG:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format=name + ' %(asctime)-15s %(levelname)-8s %(message)s',
+        )
+        for logger in ['pika']:
+            logging.getLogger(logger).setLevel(logging.WARNING)
+        new_defaults = list(Server.__init__.__defaults__)
+        # NOTE: Patch `action_logger` argument default value.
+        new_defaults[6] = AccessLogGenerator(sys.stdout)
+        Server.__init__.__defaults__ = tuple(new_defaults)
+        observer = PythonLoggingObserver(loggerName='twisted')
+        observer.start()
