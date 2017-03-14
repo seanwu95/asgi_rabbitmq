@@ -15,6 +15,8 @@ class RabbitmqLayerTestCaseMixin(object):
     isolated virtual host for each test.
     """
 
+    local = False
+
     def _pre_setup(self):
         """Create RabbitMQ virtual host."""
 
@@ -29,10 +31,14 @@ class RabbitmqLayerTestCaseMixin(object):
         self.management = AdminAPI(management_url, (user, password))
         self.management.create_vhost(self.virtual_host)
         self.management.create_user_permission(user, self.virtual_host)
+        if self.local:
+            layer_class_name = 'asgi_rabbitmq.RabbitmqLocalChannelLayer'
+        else:
+            layer_class_name = 'asgi_rabbitmq.RabbitmqChannelLayer'
         self._overridden_settings = {
             'CHANNEL_LAYERS': {
                 'default': {
-                    'BACKEND': 'asgi_rabbitmq.RabbitmqChannelLayer',
+                    'BACKEND': layer_class_name,
                     'ROUTING': settings.CHANNEL_LAYERS['default']['ROUTING'],
                     'CONFIG': {
                         'url': self.amqp_url,

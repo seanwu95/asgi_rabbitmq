@@ -44,6 +44,17 @@ class IntegrationTest(RabbitmqLayerTestCaseMixin, ChannelLiveServerTestCase):
         assert proc.returncode == 0
 
 
+class LocalIntegrationTest(IntegrationTest):
+
+    local = True
+
+
 class ConcurrentIntegrationTest(IntegrationTest):
 
+    worker_threads = 4
+
+
+class LocalConcurrentIntegrationTest(IntegrationTest):
+
+    local = True
     worker_threads = 4
