@@ -24,6 +24,6 @@ install:
   - pip install $DJANGO_VERSION
   - pip install .[tests]
 script:
-  - coverage run -m pytest -v -s
+  - coverage run -m pytest
 after_success:
   - codecov
