@@ -163,8 +163,14 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         """`new_channel` must declare queue if its name is available."""
 
         name = self.channel_layer.new_channel('test.foo!')
-        queue = name.rsplit('!', 1)[-1]
+        queue = 'amq.gen-' + name.rsplit('!', 1)[-1]
         assert queue in self.defined_queues
+
+    def test_new_channel_removes_internal_prefix(self):
+        """New channel name shouldn't contain `amq.gen-` after ! or ?."""
+
+        name = self.channel_layer.new_channel('test.foo!')
+        assert 'amq.gen-' not in name
 
     def test_new_channel_capacity(self):
         """Channel created with `new_channel` must support capacity check."""
@@ -375,11 +381,11 @@ class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
 
         name = self.channel_layer.new_channel('foo!')
         self.channel_layer.send(name, {'bar': 'baz'})
-        assert name[4:] in self.defined_queues
+        assert 'amq.gen-' + name[4:] in self.defined_queues
 
         name = self.channel_layer.new_channel('foo?')
         self.channel_layer.send(name, {'bar': 'baz'})
-        assert name[4:] in self.defined_queues
+        assert 'amq.gen-' + name[4:] in self.defined_queues
 
     def test_groups(self):
         """Tests that basic group addition and send works."""

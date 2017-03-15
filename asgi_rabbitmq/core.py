@@ -74,9 +74,9 @@ class Protocol(object):
     def get_queue_name(self, channel):
 
         if '!' in channel:
-            return channel.rsplit('!', 1)[-1]
+            return 'amq.gen-' + channel.rsplit('!', 1)[-1]
         elif '?' in channel:
-            return channel.rsplit('?', 1)[-1]
+            return 'amq.gen-' + channel.rsplit('?', 1)[-1]
         else:
             return channel
 
@@ -600,7 +600,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         assert pattern.endswith('!') or pattern.endswith('?')
         future = self.thread.schedule(NEW_CHANNEL)
         queue_name = future.result()
-        channel = pattern + queue_name
+        channel = pattern + queue_name[8:]  # Remove 'amq.gen-' prefix.
         return channel
 
     def declare_channel(self, channel):
