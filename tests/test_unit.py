@@ -12,8 +12,9 @@ from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
 from channels.routing import null_consumer, route
+from channels.test import ChannelTestCase
 from channels.worker import Worker
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from msgpack.exceptions import ExtraData
 from pika.exceptions import ConnectionClosed
 
@@ -411,3 +412,27 @@ class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
         channel, message = self.channel_layer.receive([name3])
         assert channel is None
         assert message is None
+
+
+class InheritanceTest(TestCase):
+
+    def test_mixin_inheritance_verification(self):
+        """
+        RabbitmqLayerTestCaseMixin should deny multiple inheritance
+        together with ChannelTestCaseMixin.  This mixin substitute our
+        layer with inmemory one, but our goal here to test real project
+        against real broker.
+        """
+
+        class Test(RabbitmqLayerTestCaseMixin, ChannelTestCase):
+
+            def runTest(self):
+
+                pass
+
+        # Emulate test run.
+        test = Test()
+        result = test.defaultTestResult()
+        test(result)
+        [(_, error)] = result.errors
+        assert 'django.core.exceptions.ImproperlyConfigured' in error

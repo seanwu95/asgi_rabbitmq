@@ -2,7 +2,9 @@ from os import environ
 from random import choice
 from string import ascii_letters
 
+from channels.test.base import ChannelTestCaseMixin
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.test.utils import override_settings
 from rabbitmq_admin import AdminAPI
 
@@ -20,6 +22,10 @@ class RabbitmqLayerTestCaseMixin(object):
     def _pre_setup(self):
         """Create RabbitMQ virtual host."""
 
+        if ChannelTestCaseMixin in self.__class__.__mro__:
+            raise ImproperlyConfigured(
+                'ChannelTestCase is not allowed as base class for '
+                'RabbitmqLayerTestCaseMixin')
         hostname = environ.get('RABBITMQ_HOST', 'localhost')
         port = environ.get('RABBITMQ_PORT', '5672')
         user = environ.get('RABBITMQ_USER', 'guest')
