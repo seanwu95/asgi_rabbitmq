@@ -435,4 +435,4 @@ class InheritanceTest(TestCase):
         result = test.defaultTestResult()
         test(result)
         [(_, error)] = result.errors
-        assert 'django.core.exceptions.ImproperlyConfigured' in error
+        assert 'ImproperlyConfigured' in error
