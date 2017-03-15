@@ -291,6 +291,7 @@ class Protocol(object):
             body=body,
             properties=self.publish_properties,
         )
+        self.resolve.set_result(None)
 
     # Dead letters processing.
 
@@ -487,11 +488,6 @@ class RabbitmqConnection(object):
             partial(protocol.register_channel, method),
         )
         amqp_channel.on_callback_error_callback = protocol.protocol_error
-        # FIXME: possible race condition.
-        #
-        # Second schedule call was made after we create channel for
-        # the first call, but before RabbitMQ respond with Ok.  We
-        # should not fail with attribute error.
         self.protocols[ident] = protocol
 
     def notify_futures(self, connection, code, msg):
@@ -620,7 +616,8 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send_group(self, group, message):
 
-        self.thread.schedule(SEND_GROUP, group, message)
+        future = self.thread.schedule(SEND_GROUP, group, message)
+        return future.result()
 
 
 # TODO: is it optimal to read bytes from content frame, call python

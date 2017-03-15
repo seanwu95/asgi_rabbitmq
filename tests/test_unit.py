@@ -3,11 +3,13 @@ from __future__ import unicode_literals
 import threading
 import time
 from collections import defaultdict
+from itertools import count
 
 import pytest
 from asgi_ipc import IPCChannelLayer
 from asgi_rabbitmq import RabbitmqChannelLayer, RabbitmqLocalChannelLayer
-from asgi_rabbitmq.core import EXPIRE_GROUP_MEMBER
+from asgi_rabbitmq.core import (EXPIRE_GROUP_MEMBER, ConnectionThread,
+                                Protocol, RabbitmqConnection)
 from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
 from asgiref.conformance import ConformanceTestCase
 from channels.asgi import ChannelLayerWrapper
@@ -365,6 +367,41 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         channel, message = crypto_layer.receive([name])
         assert channel == name
         assert message == {'bar': 'baz'}
+
+    def test_protocol_concurrent_open(self):
+        """We can open only one amqp channel per thread at the same time."""
+
+        class TestProtocol(Protocol):
+
+            counter = count(start=1)
+
+            def __init__(self, *args, **kwargs):
+
+                next(self.counter)
+                super(TestProtocol, self).__init__(*args, **kwargs)
+
+        class TestRabbitmqConnection(RabbitmqConnection):
+
+            Protocol = TestProtocol
+
+        class TestConnectionThread(ConnectionThread):
+
+            Connection = TestRabbitmqConnection
+
+        class TestRabbitmqChannelLayer(self.channel_layer_cls):
+
+            Thread = TestConnectionThread
+
+        layer = TestRabbitmqChannelLayer(
+            self.amqp_url,
+            expiry=1,
+            group_expiry=2,
+            capacity=self.capacity_limit,
+        )
+        layer.send_group('foo', {'bar': 'baz'})
+        layer.send_group('foo', {'x': 'y'})
+        # One for worker thread, one for dead letters.
+        assert next(TestProtocol.counter) == 3
 
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
