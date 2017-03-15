@@ -1,0 +1,27 @@
+version: '3'
+services:
+  rabbitmq:
+    image: rabbitmq
+  py35: &py35
+    image: asgirabbitmq_py35
+    volumes:
+      - ..:/code
+    depends_on:
+      - rabbitmq
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+  daphne:
+    <<: *py35
+    container_name: bench3_daphne
+    command: /code/.tox3.5.2/py35-django110/bin/daphne testproject.asgi.rabbitmq:channel_layer -e tcp:port=8000:interface=0.0.0.0
+  worker:
+    <<: *py35
+    container_name: bench3_worker
+    command: /code/.tox3.5.2/py35-django110/bin/django-admin runworker --settings testproject.settings.channels_rabbitmq
+  benchmark:
+    <<: *py35
+    container_name: bench3_benchmark
+    command: /code/.tox3.5.2/py35-django110/bin/python -m benchmark ws://daphne:8000
+    depends_on:
+      - daphne
+      - worker
