@@ -1,7 +1,6 @@
-git+https://github.com/django/asgiref.git#egg=asgiref-1.0.1
 pytest>=3.0
 pytest-django>=3.0
-git+https://github.com/proofit404/channels.git@feature/liveserver-test-case#egg=channels-1.1.1
+git+https://github.com/proofit404/channels.git@feature/liveserver-test-case#egg=channels-1.1.2
 asgi_ipc>=1.2
 requests>=2.12
 websocket_client>=0.40
