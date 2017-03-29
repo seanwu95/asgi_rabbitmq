@@ -355,6 +355,27 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         # One for worker thread, one for dead letters.
         assert next(TestProtocol.counter) == 3
 
+    def test_receive_reply_channel_cache(self):
+        """
+        We store declared queues in cache.  Reply channels have different
+        queues from its name.  When we tries to receive from unknown
+        reply channel we need to declare queue.  This queue must be
+        declared in passive mode to prevent resource error.  Also we
+        should not declare queue with name equals to the reply channel
+        occasionally.
+        """
+
+        name = self.channel_layer.new_channel('foo?')
+        # Create new channel layer to prevent caching.
+        channel_layer = self.channel_layer_cls(
+            self.amqp_url,
+            expiry=1,
+            group_expiry=2,
+            capacity=self.capacity_limit,
+        )
+        channel_layer.receive([name])
+        assert name not in self.defined_queues
+
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
 

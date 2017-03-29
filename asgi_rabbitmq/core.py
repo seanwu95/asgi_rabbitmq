@@ -119,24 +119,22 @@ class Protocol(object):
 
     def receive(self, channels, block):
 
-        unknown_queues = set(channels) - self.known_queues
-        queues_declared = partial(self.queues_declared, channels, block)
+        queues = set(map(self.get_queue_name, channels))
+        unknown_queues = queues - self.known_queues
+        queues_declared = partial(self.queues_declared, queues, channels,
+                                  block)
         if unknown_queues:
             for queue in unknown_queues:
                 self.amqp_channel.queue_declare(
                     queues_declared,
                     queue,
+                    passive=True if queue.startswith('amq.gen') else False,
                     arguments=self.queue_arguments,
                 )
         else:
             self.queues_declared(channels, block, None)
 
-    @property
-    def queue_arguments(self):
-
-        return {'x-dead-letter-exchange': self.dead_letters}
-
-    def queues_declared(self, channels, block, method_frame):
+    def queues_declared(self, queues, channels, block, method_frame):
 
         if method_frame:
             self.known_queues.add(method_frame.method.queue)
@@ -144,7 +142,7 @@ class Protocol(object):
             # means we are in the last callback and can safely go
             # further.  If any queue isn't known, we simply skip
             # processing at this point.
-            unknown_queues = set(channels) - self.known_queues
+            unknown_queues = queues - self.known_queues
             if unknown_queues:
                 return
         if block:
@@ -193,6 +191,11 @@ class Protocol(object):
             self.receive(channels=channels, block=False)
         else:
             self.resolve.set_result((None, None))
+
+    @property
+    def queue_arguments(self):
+
+        return {'x-dead-letter-exchange': self.dead_letters}
 
     # New channel.
 
