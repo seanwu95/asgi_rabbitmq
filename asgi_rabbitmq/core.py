@@ -132,7 +132,7 @@ class Protocol(object):
                     arguments=self.queue_arguments,
                 )
         else:
-            self.queues_declared(channels, block, None)
+            self.queues_declared(set(), channels, block, None)
 
     def queues_declared(self, queues, channels, block, method_frame):
 
