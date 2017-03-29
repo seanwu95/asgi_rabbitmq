@@ -6,16 +6,12 @@ from collections import defaultdict
 from itertools import count
 
 import pytest
-from asgi_ipc import IPCChannelLayer
 from asgi_rabbitmq import RabbitmqChannelLayer, RabbitmqLocalChannelLayer
 from asgi_rabbitmq.core import (EXPIRE_GROUP_MEMBER, ConnectionThread,
                                 Protocol, RabbitmqConnection)
 from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
 from asgiref.conformance import ConformanceTestCase
-from channels.asgi import ChannelLayerWrapper
-from channels.routing import null_consumer, route
 from channels.test import ChannelTestCase
-from channels.worker import Worker
 from django.test import SimpleTestCase, TestCase
 from msgpack.exceptions import ExtraData
 from pika.exceptions import ConnectionClosed
@@ -117,51 +113,6 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
 
         # TODO: figure out how to check group membership.
         super(RabbitmqChannelLayerTest, self).test_group_channels()
-
-    def test_declare_queues_on_worker_ready(self):
-        """Declare necessary queues after worker start."""
-
-        wrapper = ChannelLayerWrapper(
-            channel_layer=self.channel_layer,
-            alias='default',
-            # NOTE: Similar to `channels.routing.Router.check_default` result.
-            routing=[
-                route('http.request', null_consumer),
-                route('websocket.connect', null_consumer),
-                route('websocket.receive', null_consumer),
-            ],
-        )
-        worker = Worker(channel_layer=wrapper, signal_handlers=False)
-        worker.ready()
-        assert self.defined_queues.issuperset({
-            'http.request',
-            'websocket.receive',
-            'websocket.connect',
-        })
-
-    def test_skip_another_layer_on_worker_ready(self):
-        """
-        Don't try to declare rabbit queues if worker uses another layer
-        implementation.
-        """
-
-        wrapper = ChannelLayerWrapper(
-            channel_layer=IPCChannelLayer(),
-            alias='default',
-            # NOTE: Similar to `channels.routing.Router.check_default` result.
-            routing=[
-                route('http.request', null_consumer),
-                route('websocket.connect', null_consumer),
-                route('websocket.receive', null_consumer),
-            ],
-        )
-        worker = Worker(channel_layer=wrapper, signal_handlers=False)
-        worker.ready()
-        assert self.defined_queues.isdisjoint({
-            'http.request',
-            'websocket.receive',
-            'websocket.connect',
-        })
 
     def test_new_channel_declare_queue(self):
         """`new_channel` must declare queue if its name is available."""

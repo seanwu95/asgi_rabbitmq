@@ -4,7 +4,6 @@ from functools import partial
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
-from channels.signals import worker_ready
 from pika import SelectConnection, URLParameters
 from pika.channel import Channel
 from pika.exceptions import ConnectionClosed
@@ -23,12 +22,11 @@ except ImportError:
 SEND = 0
 RECEIVE = 1
 NEW_CHANNEL = 2
-DECLARE_CHANNEL = 3
-GROUP_ADD = 4
-GROUP_DISCARD = 5
-SEND_GROUP = 6
-DECLARE_DEAD_LETTERS = 7
-EXPIRE_GROUP_MEMBER = 8
+GROUP_ADD = 3
+GROUP_DISCARD = 4
+SEND_GROUP = 5
+DECLARE_DEAD_LETTERS = 6
+EXPIRE_GROUP_MEMBER = 7
 
 
 class Protocol(object):
@@ -44,11 +42,11 @@ class Protocol(object):
         self.ident = ident
         self.process = process
         self.crypter = crypter
+        self.known_queues = set()
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
             NEW_CHANNEL: self.new_channel,
-            DECLARE_CHANNEL: self.declare_channel,
             GROUP_ADD: self.group_add,
             GROUP_DISCARD: self.group_discard,
             SEND_GROUP: self.send_group,
@@ -91,11 +89,12 @@ class Protocol(object):
             partial(self.publish_message, channel, message),
             queue=queue,
             passive=True if '!' in channel or '?' in channel else False,
-            arguments={'x-dead-letter-exchange': self.dead_letters},
+            arguments=self.queue_arguments,
         )
 
     def publish_message(self, channel, message, method_frame):
 
+        self.known_queues.add(method_frame.method.queue)
         if method_frame.method.message_count >= self.get_capacity(channel):
             self.resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
             return
@@ -116,24 +115,38 @@ class Protocol(object):
         properties = BasicProperties(expiration=expiration)
         return properties
 
-    # Declare channel.
-
-    def declare_channel(self, channel):
-
-        self.amqp_channel.queue_declare(
-            self.channel_declared,
-            queue=channel,
-            arguments={'x-dead-letter-exchange': self.dead_letters},
-        )
-
-    def channel_declared(self, method_frame):
-
-        self.resolve.set_result(None)
-
     # Receive.
 
     def receive(self, channels, block):
 
+        unknown_queues = set(channels) - self.known_queues
+        queues_declared = partial(self.queues_declared, channels, block)
+        if unknown_queues:
+            for queue in unknown_queues:
+                self.amqp_channel.queue_declare(
+                    queues_declared,
+                    queue,
+                    arguments=self.queue_arguments,
+                )
+        else:
+            self.queues_declared(channels, block, None)
+
+    @property
+    def queue_arguments(self):
+
+        return {'x-dead-letter-exchange': self.dead_letters}
+
+    def queues_declared(self, channels, block, method_frame):
+
+        if method_frame:
+            self.known_queues.add(method_frame.method.queue)
+            # If all queues are known at this moment, that basically
+            # means we are in the last callback and can safely go
+            # further.  If any queue isn't known, we simply skip
+            # processing at this point.
+            unknown_queues = set(channels) - self.known_queues
+            if unknown_queues:
+                return
         if block:
             consumer_tags = {}
             for channel in channels:
@@ -143,36 +156,14 @@ class Protocol(object):
                 )
                 consumer_tags[tag] = channel
         else:
-            if not channels:
-                # All channels gave 404 error.
-                self.resolve.set_result((None, None))
-                return
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel = channels[0]
             no_message = partial(self.no_message, channels[1:])
             self.amqp_channel.add_callback(no_message, [Basic.GetEmpty])
-            no_queue = partial(self.no_queue, channels[1:])
-            self.amqp_channel.add_on_close_callback(no_queue)
-            self.resolve.add_done_callback(
-                lambda future: self.amqp_channel.callbacks.remove(
-                    self.amqp_channel.channel_number,
-                    '_on_channel_close',
-                    no_queue,
-                ),
-            )
             self.amqp_channel.basic_get(
                 partial(self.get_message, channel, no_message),
                 queue=self.get_queue_name(channel),
             )
-
-    # FIXME: If we tries to consume from list of channels.  One of
-    # consumer queues doesn't exists.  Channel is closed with 404
-    # error. We will never consume from existing queues and will
-    # return empty response.
-    #
-    # FIXME: If we tries to consume from channel which queue doesn't
-    # exist at this time.  We consume with blocking == True.  We must
-    # start consuming at the moment when queue were declared.
 
     def consume_message(self, consumer_tags, amqp_channel, method_frame,
                         properties, body):
@@ -199,25 +190,17 @@ class Protocol(object):
     def no_message(self, channels, method_frame):
 
         if channels:
-            self.receive(
-                channels=channels,
-                block=False,
-            )
+            self.receive(channels=channels, block=False)
         else:
             self.resolve.set_result((None, None))
-
-    def no_queue(self, channels, amqp_channel, code, msg):
-
-        self.process(
-            self.ident,
-            (RECEIVE, (channels, False), {}),
-            self.resolve,
-        )
 
     # New channel.
 
     def new_channel(self):
 
+        # FIXME: Looks like we forgot common args like dead-letters.
+        #
+        # FIXME: Add result queue to the known_queues?
         self.amqp_channel.queue_declare(
             lambda method_frame: self.resolve.set_result(
                 method_frame.method.queue,
@@ -258,7 +241,7 @@ class Protocol(object):
                 self.amqp_channel.queue_declare(
                     bind_group,
                     queue=channel,
-                    arguments={'x-dead-letter-exchange': self.dead_letters},
+                    arguments=self.queue_arguments,
                 )
 
         def declare_member(method_frame):
@@ -599,11 +582,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         channel = pattern + queue_name[8:]  # Remove 'amq.gen-' prefix.
         return channel
 
-    def declare_channel(self, channel):
-
-        future = self.thread.schedule(DECLARE_CHANNEL, channel)
-        return future.result()
-
     def group_add(self, group, channel):
 
         future = self.thread.schedule(GROUP_ADD, group, channel)
@@ -623,20 +601,3 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 # TODO: is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with
 # msgpack?  We should minimize useless work on message receive.
-
-
-def worker_start_hook(sender, **kwargs):
-    """Declare necessary queues we gonna listen."""
-
-    layer_wrapper = sender.channel_layer
-    layer = layer_wrapper.channel_layer
-    if not isinstance(layer, RabbitmqChannelLayer):
-        return
-    channels = sender.apply_channel_filters(layer_wrapper.router.channels)
-    for channel in channels:
-        layer.declare_channel(channel)
-
-
-# FIXME: This must be optional since we don't require channels package
-# to be installed.
-worker_ready.connect(worker_start_hook)
