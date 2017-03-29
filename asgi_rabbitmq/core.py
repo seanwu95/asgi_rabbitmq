@@ -283,7 +283,7 @@ class Protocol(object):
 
         self.amqp_channel.exchange_unbind(
             lambda method_frame: self.resolve.set_result(None),
-            destination=channel,
+            destination=self.get_exchange_name(channel),
             source=group,
         )
 
