@@ -97,6 +97,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         self.assertIs(channel, None)
         self.assertIs(message, None)
 
+    @pytest.mark.slow
     def test_connection_heartbeats(self):
         """
         We must answer for RabbitMQ heartbeat frames responsively.

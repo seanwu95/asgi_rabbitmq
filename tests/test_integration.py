@@ -3,10 +3,13 @@ import sys
 import time
 
 import benchmark
+import pytest
 import requests
 import websocket
 from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
 from channels.test import ChannelLiveServerTestCase
+
+pytestmark = pytest.mark.slow
 
 
 class IntegrationTest(RabbitmqLayerTestCaseMixin, ChannelLiveServerTestCase):
