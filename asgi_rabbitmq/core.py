@@ -6,7 +6,7 @@ import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from pika import SelectConnection, URLParameters
 from pika.channel import Channel
-from pika.exceptions import ConnectionClosed
+from pika.exceptions import ChannelClosed, ConnectionClosed
 from pika.spec import Basic, BasicProperties
 
 try:
@@ -388,6 +388,17 @@ class LayerChannel(Channel):
         except Exception as error:
             if self.on_callback_error_callback:
                 self.on_callback_error_callback(error)
+
+    def _on_close(self, method_frame):
+
+        super(LayerChannel, self)._on_close(method_frame)
+        if self.on_callback_error_callback:
+            self.on_callback_error_callback(
+                ChannelClosed(
+                    method_frame.method.reply_code,
+                    method_frame.method.reply_text,
+                ),
+            )
 
 
 class LayerConnection(SelectConnection):
