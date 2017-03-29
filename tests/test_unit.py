@@ -376,6 +376,16 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         channel_layer.receive([name])
         assert name not in self.defined_queues
 
+    def test_new_channel_store_defined_queue_in_cache(self):
+        """
+        When we call `new_channel` we should store generated queue name in
+        cache.
+        """
+
+        name = self.channel_layer.new_channel('foo?')
+        protocol = self.channel_layer.thread.connection.thread_protocol
+        assert 'amq.gen-' + name[4:] in protocol.known_queues
+
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
 

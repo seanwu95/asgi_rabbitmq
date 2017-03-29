@@ -202,13 +202,12 @@ class Protocol(object):
     def new_channel(self):
 
         # FIXME: Looks like we forgot common args like dead-letters.
-        #
-        # FIXME: Add result queue to the known_queues?
-        self.amqp_channel.queue_declare(
-            lambda method_frame: self.resolve.set_result(
-                method_frame.method.queue,
-            ),
-        )
+        self.amqp_channel.queue_declare(self.new_channel_declared)
+
+    def new_channel_declared(self, method_frame):
+
+        self.known_queues.add(method_frame.method.queue)
+        self.resolve.set_result(method_frame.method.queue)
 
     # Groups.
 
@@ -509,6 +508,11 @@ class RabbitmqConnection(object):
         with self.lock:
             self.process(get_ident(), (f, args, kwargs), future)
         return future
+
+    @property
+    def thread_protocol(self):
+
+        return self.protocols[get_ident()]
 
 
 class ConnectionThread(Thread):
