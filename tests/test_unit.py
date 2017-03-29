@@ -27,7 +27,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         self.channel_layer = self.channel_layer_cls(
             self.amqp_url,
             expiry=1,
-            group_expiry=2,
+            group_expiry=5,
             capacity=self.capacity_limit,
         )
         super(RabbitmqChannelLayerTest, self).setUp()
@@ -93,6 +93,32 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         self.assertIs(channel, None)
         self.assertIs(message, None)
 
+    def test_reply_channel_group_persistence_message_expiry(self):
+        """
+        Discard reply channel from all its groups when first message
+        expires in it.  Same as previous test, but check reply
+        channels.
+        """
+
+        # Setup group membership.
+        self.skip_if_no_extension('groups')
+        name = self.channel_layer.new_channel('tgme_test?')
+        self.channel_layer.group_add('tgme_group1', name)
+        self.channel_layer.group_add('tgme_group2', name)
+        self.channel_layer.send(name, {'hello': 'world'})
+        # Wait until message in the channel expires.
+        time.sleep(self.channel_layer.expiry + 1)
+        # Channel lost its membership in the group #1.
+        self.channel_layer.send_group('tgme_group1', {'hello': 'world1'})
+        channel, message = self.channel_layer.receive([name])
+        self.assertIs(channel, None)
+        self.assertIs(message, None)
+        # Channel lost its membership in the group #2.
+        self.channel_layer.send_group('tgme_group2', {'hello': 'world2'})
+        channel, message = self.channel_layer.receive([name])
+        self.assertIs(channel, None)
+        self.assertIs(message, None)
+
     @pytest.mark.slow
     def test_connection_heartbeats(self):
         """
@@ -141,7 +167,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         layer = self.channel_layer_cls(
             self.amqp_url,
             expiry=1,
-            group_expiry=2,
+            group_expiry=5,
             capacity=self.capacity_limit,
             channel_capacity={
                 'http.response!*': 10,
@@ -307,7 +333,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         crypto_layer = self.channel_layer_cls(
             self.amqp_url,
             expiry=1,
-            group_expiry=2,
+            group_expiry=5,
             capacity=self.capacity_limit,
             symmetric_encryption_keys=['test', 'old'],
         )
@@ -347,7 +373,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         layer = TestRabbitmqChannelLayer(
             self.amqp_url,
             expiry=1,
-            group_expiry=2,
+            group_expiry=5,
             capacity=self.capacity_limit,
         )
         layer.send_group('foo', {'bar': 'baz'})
@@ -370,7 +396,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         channel_layer = self.channel_layer_cls(
             self.amqp_url,
             expiry=1,
-            group_expiry=2,
+            group_expiry=5,
             capacity=self.capacity_limit,
         )
         channel_layer.receive([name])

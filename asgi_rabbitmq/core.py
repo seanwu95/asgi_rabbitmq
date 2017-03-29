@@ -78,6 +78,22 @@ class Protocol(object):
         else:
             return channel
 
+    def get_exchange_name(self, channel):
+
+        if '!' in channel:
+            return channel.rsplit('!', 1)[-1]
+        elif '?' in channel:
+            return channel.rsplit('?', 1)[-1]
+        else:
+            return channel
+
+    def get_queue_exchange(self, queue):
+
+        if queue.startswith('amq.gen-'):
+            return queue[8:]
+        else:
+            return queue
+
     # Send.
 
     def send(self, channel, message):
@@ -201,8 +217,10 @@ class Protocol(object):
 
     def new_channel(self):
 
-        # FIXME: Looks like we forgot common args like dead-letters.
-        self.amqp_channel.queue_declare(self.new_channel_declared)
+        self.amqp_channel.queue_declare(
+            self.new_channel_declared,
+            arguments=self.queue_arguments,
+        )
 
     def new_channel_declared(self, method_frame):
 
@@ -225,18 +243,19 @@ class Protocol(object):
             self.amqp_channel.queue_bind(
                 after_bind,
                 queue=self.get_queue_name(channel),
-                exchange=channel,
+                exchange=self.get_exchange_name(channel),
             )
 
         def bind_group(method_frame):
 
             self.amqp_channel.exchange_bind(
                 bind_channel,
-                destination=channel,
+                destination=self.get_exchange_name(channel),
                 source=group,
             )
 
         def declare_channel(method_frame):
+
             if '!' in channel or '?' in channel:
                 bind_group(None)
             else:
@@ -247,9 +266,10 @@ class Protocol(object):
                 )
 
         def declare_member(method_frame):
+
             self.amqp_channel.exchange_declare(
                 declare_channel,
-                exchange=channel,
+                exchange=self.get_exchange_name(channel),
                 exchange_type='fanout',
             )
 
@@ -353,7 +373,8 @@ class Protocol(object):
             channel = message['channel']
             self.group_discard(group, channel)
         elif not self.is_expire_marker(queue):
-            amqp_channel.exchange_delete(exchange=queue)
+            exchange = self.get_queue_exchange(queue)
+            amqp_channel.exchange_delete(exchange=exchange)
 
     def is_expire_marker(self, queue):
 
