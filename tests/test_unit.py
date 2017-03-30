@@ -84,11 +84,13 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         time.sleep(self.channel_layer.expiry + 1)
         # Channel lost its membership in the group #1.
         self.channel_layer.send_group('tgme_group1', {'hello': 'world1'})
+        time.sleep(0.2)  # Give dead letters time to work.
         channel, message = self.channel_layer.receive(['tgme_test'])
         self.assertIs(channel, None)
         self.assertIs(message, None)
         # Channel lost its membership in the group #2.
         self.channel_layer.send_group('tgme_group2', {'hello': 'world2'})
+        time.sleep(0.2)  # Give dead letters time to work.
         channel, message = self.channel_layer.receive(['tgme_test'])
         self.assertIs(channel, None)
         self.assertIs(message, None)
@@ -110,11 +112,13 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         time.sleep(self.channel_layer.expiry + 1)
         # Channel lost its membership in the group #1.
         self.channel_layer.send_group('tgme_group1', {'hello': 'world1'})
+        time.sleep(0.2)  # Give dead letters time to work.
         channel, message = self.channel_layer.receive([name])
         self.assertIs(channel, None)
         self.assertIs(message, None)
         # Channel lost its membership in the group #2.
         self.channel_layer.send_group('tgme_group2', {'hello': 'world2'})
+        time.sleep(0.2)  # Give dead letters time to work.
         channel, message = self.channel_layer.receive([name])
         self.assertIs(channel, None)
         self.assertIs(message, None)
@@ -195,11 +199,13 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         name = self.channel_layer.new_channel('test.foo?')
         self.channel_layer.group_add('test.group', name)
         self.channel_layer.send_group('test.group', {'foo': 'bar'})
+        time.sleep(0.2)  # Give dead letters time to work.
         channel, message = self.channel_layer.receive([name])
         assert channel == name
         assert message == {'foo': 'bar'}
         self.channel_layer.group_discard('test.group', name)
         self.channel_layer.send_group('test.group', {'foo': 'bar'})
+        time.sleep(0.2)  # Give dead letters time to work anyway.
         channel, message = self.channel_layer.receive([name])
         assert channel is None
         assert message is None
@@ -268,6 +274,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         # ignore messages died with maxlen reason.  This messages
         # caused by sequential group_add calls.
         self.channel_layer.send_group('gr_test', {'value': 'blue'})
+        time.sleep(0.2)  # Give dead letters time to work.
         channel, message = self.channel_layer.receive([name])
         assert channel == name
         assert message == {'value': 'blue'}

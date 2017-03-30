@@ -100,20 +100,24 @@ class Protocol(object):
         # minimize its impact to system.
         queue = self.get_queue_name(channel)
         self.amqp_channel.queue_declare(
-            partial(self.publish_message, channel, message),
+            partial(self.handle_publish, channel, message),
             queue=queue,
             passive=True if '?' in channel else False,
             arguments=self.queue_arguments,
         )
 
-    def publish_message(self, channel, message, method_frame):
+    def handle_publish(self, channel, message, method_frame):
 
         self.known_queues.add(method_frame.method.queue)
         if method_frame.method.message_count >= self.get_capacity(channel):
             self.resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
             return
-        queue = self.get_queue_name(channel)
         body = self.serialize(message)
+        self.publish_message(channel, body)
+
+    def publish_message(self, channel, body):
+
+        queue = self.get_queue_name(channel)
         self.amqp_channel.basic_publish(
             exchange='',
             routing_key=queue,
@@ -243,40 +247,63 @@ class Protocol(object):
 
             self.resolve.set_result(None)
 
-        def bind_channel(method_frame):
+        if '!' in channel:
 
-            self.amqp_channel.queue_bind(
-                after_bind,
-                queue=self.get_queue_name(channel),
-                exchange=self.get_exchange_name(channel),
-            )
+            def bind_channel(method_frame):
 
-        def bind_group(method_frame):
-
-            self.amqp_channel.exchange_bind(
-                bind_channel,
-                destination=self.get_exchange_name(channel),
-                source=group,
-            )
-
-        def declare_channel(method_frame):
-
-            if '?' in channel:
-                bind_group(None)
-            else:
-                self.amqp_channel.queue_declare(
-                    bind_group,
-                    queue=self.get_queue_name(channel),
-                    arguments=self.queue_arguments,
+                self.amqp_channel.queue_bind(
+                    callback=after_bind,
+                    queue=channel,
+                    exchange=group,
                 )
 
-        def declare_member(method_frame):
+            def declare_member(method_frame):
 
-            self.amqp_channel.exchange_declare(
-                declare_channel,
-                exchange=self.get_exchange_name(channel),
-                exchange_type='fanout',
-            )
+                self.amqp_channel.queue_declare(
+                    callback=bind_channel,
+                    queue=channel,
+                    arguments={
+                        'x-dead-letter-exchange': self.dead_letters,
+                        'x-expires': self.group_expiry * 1000,
+                        'x-max-length': 0,
+                    },
+                )
+        else:
+
+            def bind_channel(method_frame):
+
+                self.amqp_channel.queue_bind(
+                    after_bind,
+                    queue=self.get_queue_name(channel),
+                    exchange=self.get_exchange_name(channel),
+                )
+
+            def bind_group(method_frame):
+
+                self.amqp_channel.exchange_bind(
+                    bind_channel,
+                    destination=self.get_exchange_name(channel),
+                    source=group,
+                )
+
+            def declare_channel(method_frame):
+
+                if '?' in channel:
+                    bind_group(None)
+                else:
+                    self.amqp_channel.queue_declare(
+                        bind_group,
+                        queue=self.get_queue_name(channel),
+                        arguments=self.queue_arguments,
+                    )
+
+            def declare_member(method_frame):
+
+                self.amqp_channel.exchange_declare(
+                    declare_channel,
+                    exchange=self.get_exchange_name(channel),
+                    exchange_type='fanout',
+                )
 
         self.amqp_channel.exchange_declare(
             declare_member,
@@ -286,11 +313,18 @@ class Protocol(object):
 
     def group_discard(self, group, channel):
 
-        self.amqp_channel.exchange_unbind(
-            lambda method_frame: self.resolve.set_result(None),
-            destination=self.get_exchange_name(channel),
-            source=group,
-        )
+        if '!' in channel:
+            self.amqp_channel.queue_unbind(
+                lambda method_frame: self.resolve.set_result(None),
+                queue=channel,
+                exchange=group,
+            )
+        else:
+            self.amqp_channel.exchange_unbind(
+                lambda method_frame: self.resolve.set_result(None),
+                destination=self.get_exchange_name(channel),
+                source=group,
+            )
 
     def send_group(self, group, message):
 
@@ -372,14 +406,19 @@ class Protocol(object):
         # FIXME: what the hell zero means here?
         queue = properties.headers['x-death'][0]['queue']
         reason = properties.headers['x-death'][0]['reason']
-        if self.is_expire_marker(queue) and reason == 'expired':
+        if reason == 'expired' and self.is_expire_marker(queue):
             message = self.deserialize(body)
             group = message['group']
             channel = message['channel']
             self.group_discard(group, channel)
-        elif not self.is_expire_marker(queue):
-            exchange = self.get_queue_exchange(queue)
-            amqp_channel.exchange_delete(exchange=exchange)
+        elif reason == 'expired' and not self.is_expire_marker(queue):
+            if '!' in queue:
+                amqp_channel.queue_delete(queue=queue)
+            else:
+                exchange = self.get_queue_exchange(queue)
+                amqp_channel.exchange_delete(exchange=exchange)
+        elif reason == 'maxlen' and '!' in queue:
+            self.publish_message(queue, body)
 
     def is_expire_marker(self, queue):
 
