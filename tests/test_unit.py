@@ -143,20 +143,20 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
     def test_new_channel_declare_queue(self):
         """`new_channel` must declare queue if its name is available."""
 
-        name = self.channel_layer.new_channel('test.foo!')
-        queue = 'amq.gen-' + name.rsplit('!', 1)[-1]
+        name = self.channel_layer.new_channel('test.foo?')
+        queue = 'amq.gen-' + name.rsplit('?', 1)[-1]
         assert queue in self.defined_queues
 
     def test_new_channel_removes_internal_prefix(self):
-        """New channel name shouldn't contain `amq.gen-` after ! or ?."""
+        """New channel name shouldn't contain `amq.gen-` after ?."""
 
-        name = self.channel_layer.new_channel('test.foo!')
+        name = self.channel_layer.new_channel('test.foo?')
         assert 'amq.gen-' not in name
 
     def test_new_channel_capacity(self):
         """Channel created with `new_channel` must support capacity check."""
 
-        name = self.channel_layer.new_channel('test.foo!')
+        name = self.channel_layer.new_channel('test.foo?')
         for _ in range(self.capacity_limit):
             self.channel_layer.send(name, {'hey': 'there'})
         with self.assertRaises(self.channel_layer.ChannelFull):
@@ -170,7 +170,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
             group_expiry=5,
             capacity=self.capacity_limit,
             channel_capacity={
-                'http.response!*': 10,
+                'http.response?*': 10,
                 'http.request': 30,
             },
         )
@@ -180,7 +180,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         with pytest.raises(self.channel_layer.ChannelFull):
             layer.send('http.request', {'hey': 'there'})
         # Test regexp match.
-        name = layer.new_channel('http.response!')
+        name = layer.new_channel('http.response?')
         for _ in range(10):
             layer.send(name, {'hey': 'there'})
         with pytest.raises(self.channel_layer.ChannelFull):
@@ -192,7 +192,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         Check we can do it.
         """
 
-        name = self.channel_layer.new_channel('test.foo!')
+        name = self.channel_layer.new_channel('test.foo?')
         self.channel_layer.group_add('test.group', name)
         self.channel_layer.send_group('test.group', {'foo': 'bar'})
         channel, message = self.channel_layer.receive([name])
@@ -225,7 +225,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
     def test_receive_blocking_mode(self):
         """Check we can wait until message arrives and return it."""
 
-        name = self.channel_layer.new_channel('foo!')
+        name = self.channel_layer.new_channel('foo?')
 
         def wait_and_send():
             time.sleep(1)
@@ -256,7 +256,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         state.
         """
 
-        name = self.channel_layer.new_channel('ch_test!')
+        name = self.channel_layer.new_channel('ch_test?')
         self.channel_layer.group_add('gr_test', name)
         self.channel_layer.thread.schedule(
             EXPIRE_GROUP_MEMBER,
@@ -297,7 +297,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         # Wait for connection established.
         while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
-        name = self.channel_layer.new_channel('foo!')
+        name = self.channel_layer.new_channel('foo?')
         # Close connection and wait for it.
         self.channel_layer.thread.connection.connection.close()
         while not self.channel_layer.thread.connection.connection.is_closed:
@@ -316,7 +316,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         # Wait for connection established.
         while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
-        name = self.channel_layer.new_channel('foo!')
+        name = self.channel_layer.new_channel('foo?')
         # Try to call layer send right after connection close frame
         # was sent.
         self.channel_layer.thread.connection.connection.close()
@@ -329,7 +329,7 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         messages sent with the layer which has one.
         """
 
-        name = self.channel_layer.new_channel('foo!')
+        name = self.channel_layer.new_channel('foo?')
         crypto_layer = self.channel_layer_cls(
             self.amqp_url,
             expiry=1,
@@ -426,7 +426,7 @@ class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
     def test_send_reply_channel_to_rabbitmq_layer(self):
         """If this is reply channel we must use rabbitmq channel layer."""
 
-        name = self.channel_layer.new_channel('foo!')
+        name = self.channel_layer.new_channel('foo?')
         self.channel_layer.send(name, {'bar': 'baz'})
         assert 'amq.gen-' + name[4:] in self.defined_queues
 
@@ -438,9 +438,9 @@ class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
         """Tests that basic group addition and send works."""
 
         self.skip_if_no_extension('groups')
-        name1 = self.channel_layer.new_channel('tg_test!')
-        name2 = self.channel_layer.new_channel('tg_test!')
-        name3 = self.channel_layer.new_channel('tg_test!')
+        name1 = self.channel_layer.new_channel('tg_test?')
+        name2 = self.channel_layer.new_channel('tg_test?')
+        name3 = self.channel_layer.new_channel('tg_test?')
         # Make a group and send to it
         self.channel_layer.group_add('tgroup', name1)
         self.channel_layer.group_add('tgroup', name2)

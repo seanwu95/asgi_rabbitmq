@@ -72,7 +72,7 @@ class Protocol(object):
     def get_queue_name(self, channel):
 
         if '!' in channel:
-            return 'amq.gen-' + channel.rsplit('!', 1)[-1]
+            return channel[:channel.rfind('!') + 1]
         elif '?' in channel:
             return 'amq.gen-' + channel.rsplit('?', 1)[-1]
         else:
@@ -80,9 +80,7 @@ class Protocol(object):
 
     def get_exchange_name(self, channel):
 
-        if '!' in channel:
-            return channel.rsplit('!', 1)[-1]
-        elif '?' in channel:
+        if '?' in channel:
             return channel.rsplit('?', 1)[-1]
         else:
             return channel
@@ -104,7 +102,7 @@ class Protocol(object):
         self.amqp_channel.queue_declare(
             partial(self.publish_message, channel, message),
             queue=queue,
-            passive=True if '!' in channel or '?' in channel else False,
+            passive=True if '?' in channel else False,
             arguments=self.queue_arguments,
         )
 
@@ -120,15 +118,18 @@ class Protocol(object):
             exchange='',
             routing_key=queue,
             body=body,
-            properties=self.publish_properties,
+            properties=self.publish_properties(channel),
         )
         self.resolve.set_result(None)
 
-    @property
-    def publish_properties(self):
+    def publish_properties(self, channel=None):
 
+        if channel and '!' in channel:
+            headers = {'asgi_channel': channel.rsplit('!')[-1]}
+        else:
+            headers = None
         expiration = str(self.expiry * 1000)
-        properties = BasicProperties(expiration=expiration)
+        properties = BasicProperties(headers=headers, expiration=expiration)
         return properties
 
     # Receive.
@@ -186,6 +187,8 @@ class Protocol(object):
         for tag in consumer_tags:
             amqp_channel.basic_cancel(consumer_tag=tag)
         channel = consumer_tags[method_frame.consumer_tag]
+        if properties.headers and 'asgi_channel' in properties.headers:
+            channel = channel + properties.headers['asgi_channel']
         message = self.deserialize(body)
         self.resolve.set_result((channel, message))
 
@@ -198,6 +201,8 @@ class Protocol(object):
             no_message,
         )
         amqp_channel.basic_ack(method_frame.delivery_tag)
+        if properties.headers and 'asgi_channel' in properties.headers:
+            channel = channel + properties.headers['asgi_channel']
         message = self.deserialize(body)
         self.resolve.set_result((channel, message))
 
@@ -256,12 +261,12 @@ class Protocol(object):
 
         def declare_channel(method_frame):
 
-            if '!' in channel or '?' in channel:
+            if '?' in channel:
                 bind_group(None)
             else:
                 self.amqp_channel.queue_declare(
                     bind_group,
-                    queue=channel,
+                    queue=self.get_queue_name(channel),
                     arguments=self.queue_arguments,
                 )
 
@@ -294,7 +299,7 @@ class Protocol(object):
             exchange=group,
             routing_key='',
             body=body,
-            properties=self.publish_properties,
+            properties=self.publish_properties(),
         )
         self.resolve.set_result(None)
 
@@ -605,17 +610,21 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def send(self, channel, message):
 
+        assert self.valid_channel_name(channel), 'Channel name is not valid'
         future = self.thread.schedule(SEND, channel, message)
         return future.result()
 
     def receive(self, channels, block=False):
 
+        for channel in channels:
+            fail_msg = 'Channel name %s is not valid' % channel
+            assert self.valid_channel_name(channel, receive=True), fail_msg
         future = self.thread.schedule(RECEIVE, channels, block)
         return future.result()
 
     def new_channel(self, pattern):
 
-        assert pattern.endswith('!') or pattern.endswith('?')
+        assert pattern.endswith('?')
         future = self.thread.schedule(NEW_CHANNEL)
         queue_name = future.result()
         channel = pattern + queue_name[8:]  # Remove 'amq.gen-' prefix.
@@ -623,16 +632,21 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
     def group_add(self, group, channel):
 
+        assert self.valid_group_name(group), 'Group name is not valid'
+        assert self.valid_channel_name(channel), 'Channel name is not valid'
         future = self.thread.schedule(GROUP_ADD, group, channel)
         return future.result()
 
     def group_discard(self, group, channel):
 
+        assert self.valid_group_name(group), 'Group name is not valid'
+        assert self.valid_channel_name(channel), 'Channel name is not valid'
         future = self.thread.schedule(GROUP_DISCARD, group, channel)
         return future.result()
 
     def send_group(self, group, message):
 
+        assert self.valid_group_name(group), 'Group name is not valid'
         future = self.thread.schedule(SEND_GROUP, group, message)
         return future.result()
 
