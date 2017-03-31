@@ -60,6 +60,7 @@ class RabbitmqLayerTestCaseMixin(object):
     def _post_teardown(self):
         """Remove RabbitMQ virtual host."""
 
+        super(RabbitmqLayerTestCaseMixin, self)._post_teardown()
         self._self_overridden_context.disable()
         delattr(self, '_self_overridden_context')
         self._overridden_settings = None
@@ -67,4 +68,3 @@ class RabbitmqLayerTestCaseMixin(object):
         del self.virtual_host
         del self.amqp_url
         del self.management
-        super(RabbitmqLayerTestCaseMixin, self)._post_teardown()
