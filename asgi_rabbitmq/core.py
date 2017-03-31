@@ -413,6 +413,7 @@ class Protocol(object):
             self.group_discard(group, channel)
         elif reason == 'expired' and not self.is_expire_marker(queue):
             if '!' in queue:
+                queue = queue + properties.headers['asgi_channel']
                 amqp_channel.queue_delete(queue=queue)
             else:
                 exchange = self.get_queue_exchange(queue)
@@ -693,3 +694,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 # TODO: is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with
 # msgpack?  We should minimize useless work on message receive.
+#
+# FIXME: Looks like error in the dead letter channel stop processing
+# it at all.

@@ -419,6 +419,24 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         protocol = self.channel_layer.thread.connection.thread_protocol
         assert 'amq.gen-' + name[4:] in protocol.known_queues
 
+    def test_expired_message_does_not_destroy_process_local_channel(self):
+        """
+        When expired message comes into dead letter handler we need
+        exclude channel from all its group.  For process local
+        channels this means remove fully qualified intermediate queue.
+        This queue name is similar to the non-local part of process
+        channel.  Lets check we destroy right queue.
+        """
+
+        # Declare exclusive queue implicitly.
+        self.channel_layer.receive(['test!'])
+        # Actual test.
+        self.channel_layer.group_add('test_group', 'test!foo')
+        self.channel_layer.send_group('test_group', {'x': 'y'})
+        time.sleep(self.expiry_delay)
+        assert 'test!' in self.defined_queues
+        assert 'test!foo' not in self.defined_queues
+
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
 
