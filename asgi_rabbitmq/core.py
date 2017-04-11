@@ -344,10 +344,11 @@ class Protocol(object):
             queue=self.get_expire_marker(group, channel),
             arguments={
                 'x-dead-letter-exchange': self.dead_letters,
-                'x-message-ttl': ttl,
-                # FIXME: make this delay as little as possible.
-                'x-expires': ttl + 500,
                 'x-max-length': 1,
+                'x-message-ttl': ttl,
+                # Give broker some time to expire message before
+                # expire whole queue.
+                'x-expires': ttl + 25,
             },
         )
 
