@@ -167,6 +167,10 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
             self.channel_layer.send(name, {'hey': 'there'})
 
     def test_per_channel_capacity(self):
+        """
+        Channel capacity can be unique per channel.  Check we support
+        different capacity values in different channels.
+        """
 
         layer = self.channel_layer_cls(
             self.amqp_url,
