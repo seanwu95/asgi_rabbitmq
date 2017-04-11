@@ -400,7 +400,7 @@ class Protocol(object):
     def on_dead_letter(self, amqp_channel, method_frame, properties, body):
 
         amqp_channel.basic_ack(method_frame.delivery_tag)
-        # FIXME: what the hell zero means here?
+        # Take the most recent death reason.
         queue = properties.headers['x-death'][0]['queue']
         reason = properties.headers['x-death'][0]['reason']
         if reason == 'expired' and self.is_expire_marker(queue):
