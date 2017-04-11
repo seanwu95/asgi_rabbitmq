@@ -238,7 +238,6 @@ class Protocol(object):
 
     def group_add(self, group, channel):
 
-        # FIXME: Is it possible to do this things in parallel?
         self.expire_group_member(group, channel)
 
         def after_bind(method_frame):
