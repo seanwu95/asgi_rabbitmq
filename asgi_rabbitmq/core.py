@@ -96,8 +96,6 @@ class Protocol(object):
 
     def send(self, channel, message):
 
-        # FIXME: Avoid constant queue declaration.  Or at least try to
-        # minimize its impact to system.
         queue = self.get_queue_name(channel)
         self.amqp_channel.queue_declare(
             partial(self.handle_publish, channel, message),
