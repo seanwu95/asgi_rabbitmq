@@ -27,6 +27,7 @@ consumers = {}
 
 BENCHMARK = os.environ.get('BENCHMARK', 'False') == 'True'
 DEBUGLOG = os.environ.get('DEBUGLOG', 'False') == 'True'
+PIKALOG = os.environ.get('PIKALOG', 'False') == 'True'
 
 
 def maybe_monkeypatch(todir):
@@ -307,7 +308,10 @@ def setup_logger(name):
             level=logging.DEBUG,
             format=name + ' %(asctime)-15s %(levelname)-8s %(message)s',
         )
-        for logger in ['pika']:
+        disabled_loggers = []
+        if not PIKALOG:
+            disabled_loggers.append('pika')
+        for logger in disabled_loggers:
             logging.getLogger(logger).setLevel(logging.WARNING)
         new_defaults = list(Server.__init__.__defaults__)
         # NOTE: Patch `action_logger` argument default value.
