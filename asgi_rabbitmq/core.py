@@ -33,14 +33,12 @@ class Protocol(object):
 
     dead_letters = 'dead-letters'
 
-    def __init__(self, expiry, group_expiry, get_capacity, ident, process,
-                 crypter):
+    def __init__(self, expiry, group_expiry, get_capacity, ident, crypter):
 
         self.expiry = expiry
         self.group_expiry = group_expiry
         self.get_capacity = get_capacity
         self.ident = ident
-        self.process = process
         self.crypter = crypter
         self.known_queues = set()
         self.methods = {
@@ -541,8 +539,7 @@ class RabbitmqConnection(object):
             self.protocols[ident].apply(*method)
             return
         protocol = self.Protocol(self.expiry, self.group_expiry,
-                                 self.get_capacity, ident, self.process,
-                                 self.crypter)
+                                 self.get_capacity, ident, self.crypter)
         protocol.resolve = future
         amqp_channel = self.connection.channel(
             partial(protocol.register_channel, method),
