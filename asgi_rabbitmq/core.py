@@ -447,8 +447,8 @@ class LayerChannel(Channel):
     def _on_deliver(self, method_frame, header_frame, body):
 
         try:
-            super(LayerChannel, self)._on_deliver(self, method_frame,
-                                                  header_frame, body)
+            super(LayerChannel, self)._on_deliver(method_frame, header_frame,
+                                                  body)
         except Exception as error:
             if self.on_callback_error_callback:
                 self.on_callback_error_callback(error)
