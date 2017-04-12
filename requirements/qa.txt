@@ -2,11 +2,11 @@ pytest>=3.0
 pytest-django>=3.0
 git+https://github.com/django/asgiref.git#egg=asgiref-1.1.2
 daphne>=1.2.0
-git+https://github.com/proofit404/channels.git@feature/test-config#egg=channels-1.1.4
+git+https://github.com/django/channels.git#egg=channels-1.1.4
 asgi_ipc>=1.3.1
 requests>=2.12
 websocket_client>=0.40
 tabulate>=0.7
 statistics ; python_version < "3.0"
-git+https://github.com/proofit404/channels.git@feature/test-config#egg=channels-benchmark&subdirectory=testproject
+git+https://github.com/django/channels.git#egg=channels-benchmark&subdirectory=testproject
 cryptography
