@@ -444,6 +444,15 @@ class LayerChannel(Channel):
         self.on_callback_error_callback = None
         super(LayerChannel, self).__init__(*args, **kwargs)
 
+    def _on_deliver(self, method_frame, header_frame, body):
+
+        try:
+            super(LayerChannel, self)._on_deliver(self, method_frame,
+                                                  header_frame, body)
+        except Exception as error:
+            if self.on_callback_error_callback:
+                self.on_callback_error_callback(error)
+
     def _on_getok(self, method_frame, header_frame, body):
 
         try:
@@ -686,9 +695,6 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         return future.result()
 
 
-# TODO: is it optimal to read bytes from content frame, call python
+# TODO: Is it optimal to read bytes from content frame, call python
 # decode method to convert it to string and than parse it with
 # msgpack?  We should minimize useless work on message receive.
-#
-# FIXME: Looks like error in the dead letter channel stop processing
-# it at all.

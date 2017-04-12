@@ -441,6 +441,25 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         assert 'test!' in self.defined_queues
         assert 'test!foo' not in self.defined_queues
 
+    def test_error_in_the_dead_letter(self):
+        """Error in the dead letter processing shouldn't broke connection."""
+
+        time.sleep(0.2)  # Give dead letters time to create exchange.
+        # Publish to the dead letter broken message.  It's header does
+        # not has `x-death` key so callback will fail.
+        self.channel_layer.thread.connection.is_open.wait()
+        with self.channel_layer.thread.connection.lock:
+            self.channel_layer.thread.connection.connection.channel(
+                lambda amqp_channel: amqp_channel.basic_publish(
+                    exchange='',
+                    routing_key='dead-letters',
+                    body='foobazbar',
+                ))
+        time.sleep(0.2)  # Give dead letters time to work.
+        # This should work as expected.
+        self.channel_layer.send('foo', {'bar': 'baz'})
+        assert 'foo', {'bar': 'baz'} == self.channel_layer.receive(['foo'])
+
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
 
