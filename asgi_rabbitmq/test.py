@@ -46,7 +46,8 @@ class RabbitmqLayerTestCaseMixin(object):
                 'default': {
                     'BACKEND': layer_class_name,
                     'ROUTING': settings.CHANNEL_LAYERS['default']['ROUTING'],
-                    'CONFIG': {
+                    'CONFIG': settings.CHANNEL_LAYERS['default']['CONFIG'],
+                    'TEST_CONFIG': {
                         'url': self.amqp_url,
                     },
                 },
