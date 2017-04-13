@@ -13,17 +13,24 @@ asgi_rabbitmq
 
 |travis| |codecov|
 
+RabbitMQ backend for ASGI.
+
+- `Source Code`_
+- `Issue Tracker`_
+- `Documentation`_
+
 Installation
 ------------
 
-You can install recent available version from PyPI::
+You can install the most recent available version from PyPI::
 
     pip install asgi_rabbitmq
 
 Usage
 -----
 
-Add following lines to your django settings
+To use RabbitMQ broker as your channels layer add following lines to
+your django settings
 
 .. code:: python
 
@@ -38,7 +45,16 @@ Add following lines to your django settings
         },
     }
 
-``url`` in the example above must be written according to the `pika
-URLParameters`_ documentation.
+Now you can use channels project as usual
 
-.. _pika urlparameters: http://pika.readthedocs.io/en/latest/modules/parameters.html#urlparameters
+    daphne myproject.asgi:channel_layer
+    django-admin runworker
+
+License
+-------
+
+ASGI RabbitMQ layer is offered under 3-terms BSD license.
+
+.. _source code: https://github.com/proofit404/asgi_rabbitmq
+.. _issue tracker: https://github.com/proofit404/asgi_rabbitmq/issues
+.. _documentation: http://asgi_rabbitmq.readthedocs.io/en/latest/
