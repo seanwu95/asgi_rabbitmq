@@ -139,6 +139,32 @@ completely done by cluster itself.
 Integration tests
 -----------------
 
+Channels provides ``ChannelLiveServerTestCase`` for integration
+testing.  It requires ``TEST_CONFIG`` key in the ``default`` channel
+layer setting. This additional virtual host needs your attention every
+time you want to run tests.  Also RabbitMQ layer doesn't provide
+``flush`` extension, so one integration test can affect another.  This
+is clearly isn't desired behavior for tests.  We provide addition
+``RabbitmqLayerTestCaseMixin`` to automate this temporary virtual host
+management.
+
+.. code:: python
+
+    import requests
+    from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
+    from channels.test import ChannelLiveServerTestCase
+
+    class IntegrationTest(RabbitmqLayerTestCaseMixin, ChannelLiveServerTestCase):
+
+        def test_http_request(self):
+            """Test the ability to send http requests and receive responses."""
+
+            response = requests.get(self.live_server_url)
+            self.assertEqual(response.status_code, 200)
+
+This mixin will create new virtual host before each test and remove it
+afterwards.  ``TEST_CONFIG`` becomes unnecessary.
+
 .. _pika urlparameters: http://pika.readthedocs.io/en/latest/modules/parameters.html#urlparameters
 .. _production checklist: https://www.rabbitmq.com/production-checklist.html
 .. _wrk: https://github.com/wg/wrk
