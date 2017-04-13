@@ -8,3 +8,4 @@ __pycache__/
 dist/
 build/
 *.ipynb
+docs/_build/
