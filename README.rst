@@ -57,4 +57,4 @@ ASGI RabbitMQ layer is offered under 3-terms BSD license.
 
 .. _source code: https://github.com/proofit404/asgi_rabbitmq
 .. _issue tracker: https://github.com/proofit404/asgi_rabbitmq/issues
-.. _documentation: http://asgi_rabbitmq.readthedocs.io/en/latest/
+.. _documentation: http://asgi-rabbitmq.readthedocs.io/en/latest/
