@@ -1,10 +1,15 @@
-Welcome to asgi_rabbitmq's documentation!
-=========================================
+asgi_rabbitmq
+=============
+
+RabbitMQ backend for ASGI.
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+    :maxdepth: 2
+    :caption: Contents:
 
+    installation
+    usage
+    development/index
 
 
 Indices and tables
