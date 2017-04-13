@@ -53,6 +53,17 @@ fernet cipher build.  Use it if you want your messages be encrypted.
 Only layer instance with same keys will be able to read received
 messages successfully.  Default to ``None``.
 
+Production environment
+----------------------
+
+Official `production checklist`_ is definitely a good point to start
+prepare your infrastructure for real load.
+
+After initial setup you can try to measure HTTP response
+characteristics with wrk_ tool.  WebSockets can be tested the same way
+with `autobahn testsuite`_ or thor_ tools.  Channels itself contains
+benchmark_ tool but it will require some adaption for your project.
+
 Cluster support
 ---------------
 
@@ -129,6 +140,11 @@ Integration tests
 -----------------
 
 .. _pika urlparameters: http://pika.readthedocs.io/en/latest/modules/parameters.html#urlparameters
+.. _production checklist: https://www.rabbitmq.com/production-checklist.html
+.. _wrk: https://github.com/wg/wrk
+.. _autobahn testsuite: https://github.com/crossbario/autobahn-testsuite
+.. _thor: https://github.com/observing/thor
+.. _benchmark: https://github.com/django/channels/blob/master/testproject/benchmark.py
 .. _clustering: https://www.rabbitmq.com/clustering.html
 .. _epmd: http://erlang.org/doc/man/epmd.html
 .. _federation: https://www.rabbitmq.com/federation.html
