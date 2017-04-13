@@ -13,8 +13,11 @@ from functools import partial, wraps
 from operator import itemgetter
 
 import asgi_rabbitmq
-from channels.test.liveserver import (ChannelLiveServerTestCase, DaphneProcess,
-                                      WorkerProcess)
+from channels.test.liveserver import (
+    ChannelLiveServerTestCase,
+    DaphneProcess,
+    WorkerProcess,
+)
 from daphne.access import AccessLogGenerator
 from daphne.server import Server
 from pika.spec import Basic

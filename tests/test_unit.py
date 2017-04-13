@@ -7,8 +7,12 @@ from itertools import count
 
 import pytest
 from asgi_rabbitmq import RabbitmqChannelLayer, RabbitmqLocalChannelLayer
-from asgi_rabbitmq.core import (EXPIRE_GROUP_MEMBER, ConnectionThread,
-                                Protocol, RabbitmqConnection)
+from asgi_rabbitmq.core import (
+    EXPIRE_GROUP_MEMBER,
+    ConnectionThread,
+    Protocol,
+    RabbitmqConnection,
+)
 from asgi_rabbitmq.test import RabbitmqLayerTestCaseMixin
 from asgiref.conformance import ConformanceTestCase
 from channels.test import ChannelTestCase

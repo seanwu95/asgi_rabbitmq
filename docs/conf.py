@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 extensions = []
 
 templates_path = ['_templates']
