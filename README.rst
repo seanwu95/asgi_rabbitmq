@@ -45,7 +45,7 @@ your django settings
         },
     }
 
-Now you can use channels project as usual
+Now you can use channels project as usual::
 
     daphne myproject.asgi:channel_layer
     django-admin runworker
