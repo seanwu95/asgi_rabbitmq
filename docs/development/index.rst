@@ -2,7 +2,7 @@ Development
 ===========
 
 .. toctree::
-    :maxdepth: 1
+    :maxdepth: 2
 
     protocol
     implementation
