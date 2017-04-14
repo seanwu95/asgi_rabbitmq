@@ -188,12 +188,12 @@ Resource Cleanup
 ----------------
 
 * Queues for regular channels are never deleted.
-* (TODO) Queues for single reader channels are never deleted
-* Queues for process local channels are declared with exclusive flag
-  and will be removed after connection close.
-* Queues for group add marker will expires after group expiry seconds.
-* Intermediate queues for process local channels will expires after
+* (TODO) Queues for single reader channels are never deleted.
+* (TODO) Queues for process local channels are never deleted.
+* Intermediate queues for process local channels will expire after
   group expiry seconds.
+* Queues for group membership marker will expire after group expiry
+  seconds.
 * (TODO) Group exchanges are never deleted.
 * (TODO) Intermediate group exchanges are never deleted
 
