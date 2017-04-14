@@ -464,6 +464,45 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         self.channel_layer.send('foo', {'bar': 'baz'})
         assert 'foo', {'bar': 'baz'} == self.channel_layer.receive(['foo'])
 
+    @pytest.mark.xfail
+    def test_single_reader_queues_cleanup(self):
+        """
+        When we close connection in which single reader channel was
+        declared corresponding queue should be removed.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.connection.connection.is_open:
+            time.sleep(0.5)
+        # Create single reader channel.
+        name = self.channel_layer.new_channel('foo?')
+        # Close connection.
+        self.channel_layer.thread.connection.connection.close()
+        while not self.channel_layer.thread.connection.connection.is_closed:
+            time.sleep(0.5)
+        # Check chat corresponding queue was removed.
+        queue = 'amq.gen-' + name[4:]
+        assert queue not in self.defined_queues
+
+    @pytest.mark.xfail
+    def test_process_local_queues_cleanup(self):
+        """
+        When we close connection in which process local channel was
+        declared corresponding queue should be removed.
+        """
+
+        # Wait for connection established.
+        while not self.channel_layer.thread.connection.connection.is_open:
+            time.sleep(0.5)
+        # Create single reader channel.
+        self.channel_layer.send('foo.xxx!yyy', {'bar': 'baz'})
+        # Close connection.
+        self.channel_layer.thread.connection.connection.close()
+        while not self.channel_layer.thread.connection.connection.is_closed:
+            time.sleep(0.5)
+        # Check chat corresponding queue was removed.
+        assert 'foo.xxx!' not in self.defined_queues
+
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
 
