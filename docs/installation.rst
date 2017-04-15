@@ -5,7 +5,7 @@ Release version
 ---------------
 
 The most recent released version is available on PyPI.  To install it
-just do::
+just run::
 
     pip install asgi_rabbitmq
 

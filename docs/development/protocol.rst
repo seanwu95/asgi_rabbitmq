@@ -8,8 +8,8 @@ RabbitMQ is a message broker which provide AMQP 0.9.1 version.
 ASGI and AMQP protocols are similar in the terms they operate on.
 ASGI has channels, AMQP has queues. ASGI has groups, AMQP has
 exchanges.  But there is a huge difference between those protocols
-design.  In  AMQP by design broker decides on its own when to deliver
-message to client.  In ASGI application server want receive messages
+design.  AMQP broker decides on its own when to deliver message to
+client.  ASGI application server wants to receive messages
 when it is defined by its internal logic.
 
 This difference dictate few design decisions of this layer.  Also with
@@ -28,8 +28,8 @@ RabbitMQ queues.
 Send
 ~~~~
 
-Before publishing a message we declare queue.  We declare queue before
-each message send.  When we receive Declare.Ok response, it contains
+Message publishing requires a queue.  We declare queue before
+each message sending.  When we receive Declare.Ok response, it contains
 number of messages in the queue.  This number allows us to check if
 queue length exceeds channel capacity.  In this case ChannelFull
 exception is raised.  Otherwise we publish message.  Expiration time
@@ -42,17 +42,17 @@ Receive
 Each channel instance contains known queues cache.  When we tries to
 receive message from channel and corresponding queue doesn't present
 in this cache we declare it first.  This allows us prevent 404 errors
-when we tries to receive from non existed channel.
+when receiving from non existing channel.
 
-In the non blocking mode we use Basic.Get operation.  If we receive
-Get.Ok that mean we successfully receive message.  We can stop
-processing and return its context to user.  If we receive Get.Empty
-that mean current queue contains no messages.  We should try next
-queue from receive argument.  If this was last queue in the list, we
-return empty response (``None`` tuple).
+In the non blocking mode we use Basic.Get operation.  Receiving
+Get.Ok means that we successfully received a message.  We can stop
+processing and return its context to user.  Receiving Get.Empty
+means current queue contains no messages.  We should try next
+queue from receive argument.  If it was last queue in the list, we
+get empty response (``None`` tuple).
 
 In the blocking mode we use Basic.Consume operation.  Since we don't
-know which queue from argument list will contain messages we apply
+know which queue from argument list contains messages we apply
 this consume operation in parallel.  First Deliver.Ok response will
 got message, set acknowledgment on it and cancel all consumers.  After
 that message will be delivered to the application code.
@@ -60,11 +60,11 @@ that message will be delivered to the application code.
 Single reader channels
 ----------------------
 
-Single readers like ``http.request.body?ABCDEF`` has unique part in
-its name.  This channels can be created with ``new_channel`` method.
+Single readers like ``http.request.body?ABCDEF`` have unique part in
+their names.  These channels should be created with ``new_channel`` method.
 This method call Queue.Declare with empty queue name.  RabbitMQ will
-generate unique queue name and return this name in the Declare.Ok
-response.  This queue will have special prefix means it was
+generate unique queue name and return it in the Declare.Ok response.
+This queue will have special prefix means it was
 automatically generated (like ``amq.gen-ABCDEF``).
 
 Send
@@ -77,7 +77,7 @@ creation.  The rest of the procedure is the same.
 Receive
 ~~~~~~~
 
-When we tries to receive from single reader channel we declare
+When we try to receive from single reader channel we declare
 corresponding queue in the passive mode.  Just to put it into cache of
 know queues.  The rest of the procedure is the same.
 
@@ -105,7 +105,7 @@ channels.  When we receives message we check if it has
 Groups
 ------
 
-Groups are meant to be broad cast mechanism.  Basically they are
+Groups are meant to be broadcast mechanism.  Basically they are
 implemented as fanout exchanges.  With some additions.
 
 Send
@@ -119,7 +119,7 @@ Add
 
 Groups for regular and single reader channels are implemented as two
 steps bindings.  First of all we have fanout exchange which name
-equals to the group name.  Than we have intermediate exchange named
+equals to the group name.  Then we have intermediate exchange named
 after channel we want to add to group.  Exchange for regular channel
 have the same name.  Exchange for single reader has name equals to
 part after "?" sign.  After that we create exchange to exchange
@@ -135,7 +135,7 @@ Discard
 ~~~~~~~
 
 Channel can be removed from group manually calling ``group_discard``
-method.  In this case we just unbind intermediate exchange from group
+method.  When discarding we just unbind intermediate exchange from group
 exchange.
 
 Channel should be removed from all its groups if message expires in
@@ -143,11 +143,11 @@ it.  For this reason we have message TTL and intermediate exchange.
 All channel queues were declared with dead letters exchange.  Each
 channel layer instance listens to dead letter queue.  When message was
 dead lettered because of x-expires reason we delete intermediate
-exchange.  This destroys all binds to group exchanges.  As a result we
+exchange.  This destroys all bindings to group exchanges.  As a result we
 remove channel from all its groups.
 
 If no one calls ``group_add`` long enough (the value of group expiry)
-we need to remove channel from exactly this group.  For this reason we
+we need to remove channel from exact group.  For this reason we
 have marker queues.  Message expiration in this queue equals to the
 group expiry value.  When this message will be dead lettered because
 of x-expires we will unbind intermediate exchange from group
@@ -180,9 +180,9 @@ queue twice.
 Discard
 ~~~~~~~
 
-If we decide to remove process local channel from one or all its
-groups, we need to do the same we do for regular channels.  But
-instead of intermediate exchange we operates on intermediate queue.
+If we decide to remove process local channel from one or all of its
+groups, we need to do the same as we do for regular channels.  But
+instead of intermediate exchange we operate on intermediate queue.
 
 Resource Cleanup
 ----------------

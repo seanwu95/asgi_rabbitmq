@@ -6,7 +6,7 @@ Heartbeats
 
 RabbitMQ requires client to respond to the heartbeat frames.  After
 twice missed heartbeats server will close connection forcibly.
-Channels package is written in the synchronous code completely.  To be
+Channels package is written with synchronous code completely.  To be
 able to handle heartbeats responsively we need the ability to process
 connection frames separately from channels.  We need threads.
 
@@ -23,8 +23,8 @@ started and connection is established it will be released first time.
 Also threading event will be sent at this moment to notify worker
 threads they can start working with connection.
 
-If worker thread want to call any connection method, it need to
-acquire this lock.  If connection receive frame from RabbitMQ, to
+If worker thread want to call any connection method, it should
+acquire this lock.  If connection receives frame from RabbitMQ, to
 process it event look need to acquire this lock too.  For this reason
 we introduced ``LayerConnection`` class.
 
