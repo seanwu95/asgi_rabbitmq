@@ -21,47 +21,48 @@ settings module.
         },
     }
 
-``url`` parameter is required. It must be string contains full
-qualified rabbitmq vhost url. ``/`` symbols must be encoded like
-``%2F`` sequence.  You can pass additional parameter to the connection
-object with additional query string.  For example we can tune
-heartbeat frame internals this way::
+**CONFIG**
+
+* ``url`` – **required** string with full qualified rabbitmq vhost url.
+  ``/`` symbols must be url encoded in ``%2F`` sequence.  You can pass
+  additional parameters to connection object with additional query string.
+  For example we can tune heartbeat frame internals this way::
 
     amqp://guest:guest@localhost:5672/myvhost?heartbeat_interval=15
 
-Refer `pika URLParameters`_ documentation for complete list of
-possible argument list.
+  Refer `pika URLParameters`_ documentation for complete list of
+  possible arguments.
 
-``expiry`` optional message expiration time.  Literally a TTL of your
-messages. Default to 60.
+* ``expiry`` *optional* message expiration time.  Literally a TTL of your
+  messages. Defaults to 60.
 
-``group_expiry`` optional group membership expiration.  How long will
-it takes to lose membership in a group after last call to
-``Group.add``.  Default to one day.
+* ``group_expiry`` *optional* group membership expiration time.  How long will
+  it take to lose membership in a group after last call to
+  ``Group.add``.  Defaults to one day.
 
-``capacity`` optional number of messages before backpressure mechanism
-comes in.  Default to 100.
+* ``capacity`` *optional* number of messages before backpressure mechanism
+  comes in.  Defaults to 100.
 
-``channel_capacity`` optional per channels capacity.  Should be a
-dictionary with channel name regexp as a key and capacity as a value.
-Refer ``channels`` documentation for more complete info.  Default to
-``None``.
+* ``channel_capacity`` *optional* per channel capacity.  Should be a
+  dictionary with channel name regexp as a key and capacity as a value.
+  Refer ``channels`` documentation for more complete info.  Defaults to
+  ``None``.
 
-``symmetric_encryption_keys`` optional encryption keys.  If provided
-should me a list of strings.  Each key will be used as a source for
-fernet cipher build.  Use it if you want your messages be encrypted.
-Only layer instance with same keys will be able to read received
-messages successfully.  Default to ``None``.
+* ``symmetric_encryption_keys`` *optional* encryption keys.  Should be
+  a list of strings.  Each key will be used as a source for
+  fernet cipher build.  Use it if you want your messages to be encrypted.
+  Only layer instance with same keys will be able to read received
+  messages successfully.  Defaults to ``None``.
 
 Production environment
 ----------------------
 
 Official `production checklist`_ is definitely a good point to start
-prepare your infrastructure for real load.
+to prepare your infrastructure for real load.
 
 After initial setup you can try to measure HTTP response
-characteristics with wrk_ tool.  WebSockets can be tested the same way
-with `autobahn testsuite`_ or thor_ tools.  Channels itself contains
+metrics with wrk_ tool.  WebSockets can be tested the same way
+with `autobahn testsuite`_ or thor_ tools.  Channels itself contain
 benchmark_ tool but it will require some adaption for your project.
 
 Cluster support
@@ -131,10 +132,10 @@ Now you can run infrastructure on local machine::
     daphne -e tcp:interface=localhost:port=8000 myproject.asgi:channel_layer
     django-admin runworker --layer two
 
-If your open browser tab on the http://localhost:8000/ you should see
+Open your browser with http://localhost:8000/ and you should see
 your project index page.  As you can see Daphne knows about first node
 and worker knows about second node.  Message synchronization
-completely done by cluster itself.
+completely handled by cluster itself.
 
 Integration tests
 -----------------
@@ -142,7 +143,7 @@ Integration tests
 Channels provides ``ChannelLiveServerTestCase`` for integration
 testing.  It requires ``TEST_CONFIG`` key in the ``default`` channel
 layer setting. This additional virtual host needs your attention every
-time you want to run tests.  Also RabbitMQ layer doesn't provide
+time you want to run tests.  RabbitMQ layer doesn't provide
 ``flush`` extension, so one integration test can affect another.  This
 is clearly isn't desired behavior for tests.  We provide addition
 ``RabbitmqLayerTestCaseMixin`` to automate this temporary virtual host
