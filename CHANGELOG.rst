@@ -4,6 +4,12 @@
 Changelog
 ---------
 
+0.4.1 (2017-04-15)
+++++++++++++++++++
+
+- Add ``__version__`` variable to pass channels package compatibility
+  test.
+
 0.4 (2017-04-15)
 ++++++++++++++++
 
