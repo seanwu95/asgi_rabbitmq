@@ -6,7 +6,11 @@ import msgpack
 from asgiref.base_layer import BaseChannelLayer
 from pika import SelectConnection, URLParameters
 from pika.channel import Channel
-from pika.exceptions import ChannelClosed, ConnectionClosed
+from pika.exceptions import (
+    ChannelClosed,
+    ConnectionClosed,
+    DuplicateConsumerTag,
+)
 from pika.spec import Basic, BasicProperties
 
 try:
@@ -443,6 +447,47 @@ class LayerChannel(Channel):
 
         self.on_callback_error_callback = None
         super(LayerChannel, self).__init__(*args, **kwargs)
+
+    def basic_consume(self,
+                      consumer_callback,
+                      queue='',
+                      no_local=False,
+                      no_ack=False,
+                      exclusive=False,
+                      consumer_tag=None,
+                      arguments=None):
+        """Basic.Consume method with `no_local` argument supported."""
+
+        self._validate_channel_and_callback(consumer_callback)
+
+        if not consumer_tag:
+            consumer_tag = self._generate_consumer_tag()
+
+        if consumer_tag in self._consumers or consumer_tag in self._cancelled:
+            raise DuplicateConsumerTag(consumer_tag)
+
+        if no_ack:
+            self._consumers_with_noack.add(consumer_tag)
+
+        self._consumers[consumer_tag] = consumer_callback
+        self._pending[consumer_tag] = list()
+        self._rpc(
+            Basic.Consume(
+                queue=queue,
+                consumer_tag=consumer_tag,
+                no_local=no_local,
+                no_ack=no_ack,
+                exclusive=exclusive,
+                arguments=arguments or {},
+            ),
+            self._on_eventok,
+            [(Basic.ConsumeOk,
+              {
+                  'consumer_tag': consumer_tag
+              })],
+        )
+
+        return consumer_tag
 
     def _on_deliver(self, method_frame, header_frame, body):
 
