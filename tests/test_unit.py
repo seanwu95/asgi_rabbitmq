@@ -37,6 +37,17 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         super(RabbitmqChannelLayerTest, self).setUp()
 
     @property
+    def defined_exchanges(self):
+        """Get exchange names defined in current vhost."""
+
+        definitions = self.management.get_definitions()
+        exchange_definitions = defaultdict(set)
+        for exchange in definitions['exchanges']:
+            exchange_definitions[exchange['vhost']].add(exchange['name'])
+        exchanges = exchange_definitions[self.virtual_host]
+        return exchanges
+
+    @property
     def defined_queues(self):
         """Get queue names defined in current vhost."""
 
