@@ -475,6 +475,30 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         self.channel_layer.send('foo', {'bar': 'baz'})
         assert 'foo', {'bar': 'baz'} == self.channel_layer.receive(['foo'])
 
+    def test_groups_exchange_cleanup(self):
+        """
+        When all queues of all channels in the group were removed, we
+        should remove groups and intermediate exchanges.
+        """
+
+        foo = self.channel_layer.new_channel('foo?')
+        bar = self.channel_layer.new_channel('bar?')
+        baz = self.channel_layer.new_channel('baz?')
+        self.channel_layer.group_add('gr_foo', foo)
+        self.channel_layer.group_add('gr_foo', bar)
+        self.channel_layer.group_add('gr_foo', baz)
+
+        # Close connection.
+        self.channel_layer.thread.connection.connection.close()
+        while not self.channel_layer.thread.connection.connection.is_closed:
+            time.sleep(0.5)
+
+        # Assert intermediate exchanges.
+        assert 'gr_foo' not in self.defined_exchanges
+        assert foo.rsplit('?', 1)[-1] not in self.defined_exchanges
+        assert bar.rsplit('?', 1)[-1] not in self.defined_exchanges
+        assert baz.rsplit('?', 1)[-1] not in self.defined_exchanges
+
     @pytest.mark.xfail
     def test_single_reader_queues_cleanup(self):
         """

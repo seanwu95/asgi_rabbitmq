@@ -229,12 +229,19 @@ class Protocol(object):
         self.amqp_channel.queue_declare(
             self.new_channel_declared,
             arguments=self.queue_arguments,
+            auto_delete=True,
         )
 
     def new_channel_declared(self, method_frame):
 
-        self.known_queues.add(method_frame.method.queue)
-        self.resolve.set_result(method_frame.method.queue)
+        queue = method_frame.method.queue
+        self.amqp_channel.basic_consume(
+            lambda *args: None,
+            queue=queue,
+            no_local=True,
+        )
+        self.known_queues.add(queue)
+        self.resolve.set_result(queue)
 
     # Groups.
 
@@ -302,12 +309,14 @@ class Protocol(object):
                     declare_channel,
                     exchange=self.get_exchange_name(channel),
                     exchange_type='fanout',
+                    auto_delete=True,
                 )
 
         self.amqp_channel.exchange_declare(
             declare_member,
             exchange=group,
             exchange_type='fanout',
+            auto_delete=True,
         )
 
     def group_discard(self, group, channel):
