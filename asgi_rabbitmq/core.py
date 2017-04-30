@@ -152,6 +152,7 @@ class Protocol(object):
                     queues_declared,
                     queue,
                     passive=True if queue.startswith('amq.gen') else False,
+                    auto_delete=True if '!' in queue else False,
                     arguments=self.queue_arguments,
                 )
         else:
