@@ -189,13 +189,23 @@ class Protocol(object):
                 consumer_tags[tag] = channel
         else:
             channels = list(channels)  # Daphne sometimes pass dict.keys()
-            channel = channels[0]
-            no_message = partial(self.no_message, channels[1:])
-            self.amqp_channel.add_callback(no_message, [Basic.GetEmpty])
-            self.amqp_channel.basic_get(
-                partial(self.get_message, channel, no_message),
-                queue=self.get_queue_name(channel),
-            )
+            channel, channels = channels[0], channels[1:]
+            if '!' in channel:
+                if channel in self.message_store:
+                    channel_name, body = self.message_store[channel].pop(0)
+                    message = self.deserialize(body)
+                    self.resolve.set_result((channel_name, message))
+                elif channels:
+                    self.receive(channels=channels, block=False)
+                else:
+                    self.resolve.set_result((None, None))
+            else:
+                no_message = partial(self.no_message, channels)
+                self.amqp_channel.add_callback(no_message, [Basic.GetEmpty])
+                self.amqp_channel.basic_get(
+                    partial(self.get_message, channel, no_message),
+                    queue=self.get_queue_name(channel),
+                )
 
     def consume_message(self, consumer_tags, amqp_channel, method_frame,
                         properties, body):
