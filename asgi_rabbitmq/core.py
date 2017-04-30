@@ -231,11 +231,6 @@ class Protocol(object):
     def new_channel_declared(self, method_frame):
 
         queue = method_frame.method.queue
-        self.amqp_channel.basic_consume(
-            lambda *args: None,
-            queue=queue,
-            no_local=True,
-        )
         self.known_queues.add(queue)
         self.resolve.set_result(queue)
 
@@ -312,7 +307,6 @@ class Protocol(object):
             declare_member,
             exchange=group,
             exchange_type='fanout',
-            auto_delete=True,
         )
 
     def group_discard(self, group, channel):
