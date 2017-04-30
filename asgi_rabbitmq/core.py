@@ -1,6 +1,6 @@
 import base64
 import hashlib
-from collections import defaultdict
+from collections import defaultdict, deque
 from functools import partial
 
 import msgpack
@@ -45,7 +45,7 @@ class Protocol(object):
         # FIXME: do not start consumers on the same channel for
         # different threads.
         self.consumed_channels = set()
-        self.message_store = defaultdict(list)
+        self.message_store = defaultdict(deque)
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
@@ -192,7 +192,7 @@ class Protocol(object):
             channel, channels = channels[0], channels[1:]
             if '!' in channel:
                 if channel in self.message_store:
-                    channel_name, body = self.message_store[channel].pop(0)
+                    channel_name, body = self.message_store[channel].popleft()
                     message = self.deserialize(body)
                     self.resolve.set_result((channel_name, message))
                 elif channels:
