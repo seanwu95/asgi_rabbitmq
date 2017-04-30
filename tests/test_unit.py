@@ -520,7 +520,6 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         queue = 'amq.gen-' + name[4:]
         assert queue not in self.defined_queues
 
-    @pytest.mark.xfail
     def test_process_local_queues_cleanup(self):
         """
         When we close connection in which process local channel was
@@ -530,12 +529,18 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         # Wait for connection established.
         while not self.channel_layer.thread.connection.connection.is_open:
             time.sleep(0.5)
-        # Create single reader channel.
+
+        # Create process local channel.
         self.channel_layer.send('foo.xxx!yyy', {'bar': 'baz'})
+
+        # Create single (and the last) consumer for this queue.
+        self.channel_layer.receive(['foo.xxx!'])
+
         # Close connection.
         self.channel_layer.thread.connection.connection.close()
         while not self.channel_layer.thread.connection.connection.is_closed:
             time.sleep(0.5)
+
         # Check chat corresponding queue was removed.
         assert 'foo.xxx!' not in self.defined_queues
 

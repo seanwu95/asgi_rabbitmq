@@ -1,5 +1,6 @@
 import base64
 import hashlib
+from collections import defaultdict
 from functools import partial
 
 import msgpack
@@ -41,6 +42,10 @@ class Protocol(object):
         self.ident = ident
         self.crypter = crypter
         self.known_queues = set()
+        # FIXME: do not start consumers on the same channel for
+        # different threads.
+        self.consumed_channels = set()
+        self.message_store = defaultdict(list)
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
@@ -99,6 +104,7 @@ class Protocol(object):
             partial(self.handle_publish, channel, message),
             queue=queue,
             passive=True if '?' in channel else False,
+            auto_delete=True if '!' in channel else False,
             arguments=self.queue_arguments,
         )
 
@@ -162,6 +168,16 @@ class Protocol(object):
             unknown_queues = queues - self.known_queues
             if unknown_queues:
                 return
+        # Start consumers for all process local channels
+        for channel in channels:
+            if '!' in channel and channel not in self.consumed_channels:
+                self.amqp_channel.basic_consume(
+                    partial(self.consume_process_local, channel),
+                    queue=channel,
+                    exclusive=True,
+                )
+                self.consumed_channels.add(channel)
+        # Receive message.
         if block:
             consumer_tags = {}
             for channel in channels:
@@ -191,6 +207,17 @@ class Protocol(object):
             channel = channel + properties.headers['asgi_channel']
         message = self.deserialize(body)
         self.resolve.set_result((channel, message))
+
+    def consume_process_local(self, channel, amqp_channel, method_frame,
+                              properties, body):
+        """Long lived consumer for process local channels."""
+
+        amqp_channel.basic_ack(method_frame.delivery_tag)
+        if properties.headers and 'asgi_channel' in properties.headers:
+            full_channel_name = channel + properties.headers['asgi_channel']
+        else:
+            full_channel_name = channel
+        self.message_store[channel].append((full_channel_name, body))
 
     def get_message(self, channel, no_message, amqp_channel, method_frame,
                     properties, body):
