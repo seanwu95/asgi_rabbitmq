@@ -180,6 +180,12 @@ class Protocol(object):
                     exclusive=True,
                 )
                 self.consumed_channels.add(channel)
+        # Check local storage.
+        for channel in channels:
+            if '!' in channel and self.message_store.get(channel, None):
+                channel_name, body = self.message_store[channel].popleft()
+                message = self.deserialize(body)
+                self.resolve.set_result((channel_name, message))
         # Receive message.
         if block:
             for channel in channels:
@@ -195,11 +201,7 @@ class Protocol(object):
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel, channels = channels[0], channels[1:]
             if '!' in channel:
-                if self.message_store.get(channel, None):
-                    channel_name, body = self.message_store[channel].popleft()
-                    message = self.deserialize(body)
-                    self.resolve.set_result((channel_name, message))
-                elif channels:
+                if channels:
                     self.receive(channels=channels, block=False)
                 else:
                     self.resolve.set_result((None, None))
