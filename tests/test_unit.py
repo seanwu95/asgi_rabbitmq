@@ -282,6 +282,40 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         assert channel == 'foo!aaa'
         assert message == {'bar': 'baz'}
 
+    def test_both_receive_blocking_mode(self):
+        """
+        When we wait for both regular and process local channels, we
+        resolve future from process local channel consumer.  In this
+        consumer we need cancel regular channel consumer.  This will
+        prevent reading messages before we actually call receive next
+        time.
+        """
+
+        def wait_and_send():
+            time.sleep(1)
+            self.channel_layer.send('foo!aaa', {'bar': 'baz'})
+            self.channel_layer.send('quiz', {'xxx': 'yyy'})
+
+        thread = threading.Thread(target=wait_and_send)
+        thread.deamon = True
+        thread.start()
+
+        # Start and stop regular channel consumer.
+        channel, message = self.channel_layer.receive(
+            ['quiz', 'foo!'],
+            block=True,
+        )
+        assert channel == 'foo!aaa'
+        assert message == {'bar': 'baz'}
+
+        # Get time for possible non stopped consumer to accept message.
+        time.sleep(1)
+
+        # Message should present in the `quiz` channel.
+        channel, message = self.channel_layer.receive(['quiz'], block=True)
+        assert channel == 'quiz'
+        assert message == {'xxx': 'yyy'}
+
     def test_send_group_message_expiry(self):
         """
         Tests that messages expire correctly when it was sent to group.

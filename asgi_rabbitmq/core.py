@@ -47,6 +47,7 @@ class Protocol(object):
         self.consumed_channels = set()
         self.message_store = defaultdict(deque)
         self.blocked_receive = set()
+        self.consumer_tags = {}
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
@@ -181,16 +182,15 @@ class Protocol(object):
                 self.consumed_channels.add(channel)
         # Receive message.
         if block:
-            consumer_tags = {}
             for channel in channels:
                 if '!' in channel:
                     self.blocked_receive.add(channel)
                 else:
                     tag = self.amqp_channel.basic_consume(
-                        partial(self.consume_message, consumer_tags),
+                        self.consume_message,
                         queue=self.get_queue_name(channel),
                     )
-                    consumer_tags[tag] = channel
+                    self.consumer_tags[tag] = channel
         else:
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel, channels = channels[0], channels[1:]
@@ -211,14 +211,14 @@ class Protocol(object):
                     queue=self.get_queue_name(channel),
                 )
 
-    def consume_message(self, consumer_tags, amqp_channel, method_frame,
-                        properties, body):
+    def consume_message(self, amqp_channel, method_frame, properties, body):
 
         amqp_channel.basic_ack(method_frame.delivery_tag)
-        for tag in consumer_tags:
+        for tag in self.consumer_tags:
             amqp_channel.basic_cancel(consumer_tag=tag)
+        channel = self.consumer_tags[method_frame.consumer_tag]
         self.blocked_receive = set()
-        channel = consumer_tags[method_frame.consumer_tag]
+        self.consumer_tags = {}
         if properties.headers and 'asgi_channel' in properties.headers:
             channel = channel + properties.headers['asgi_channel']
         message = self.deserialize(body)
@@ -234,7 +234,10 @@ class Protocol(object):
         else:
             full_channel_name = channel
         if channel in self.blocked_receive:
+            for tag in self.consumer_tags:
+                amqp_channel.basic_cancel(consumer_tag=tag)
             self.blocked_receive = set()
+            self.consumer_tags = {}
             message = self.deserialize(body)
             self.resolve.set_result((full_channel_name, message))
         else:
