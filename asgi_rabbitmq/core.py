@@ -191,7 +191,7 @@ class Protocol(object):
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel, channels = channels[0], channels[1:]
             if '!' in channel:
-                if channel in self.message_store:
+                if self.message_store.get(channel, None):
                     channel_name, body = self.message_store[channel].popleft()
                     message = self.deserialize(body)
                     self.resolve.set_result((channel_name, message))
