@@ -264,6 +264,24 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         assert channel == name
         assert message == {'bar': 'baz'}
 
+    def test_process_local_receive_blocking_mode(self):
+        """
+        Check we can wait until message arrives in the process local
+        channel and return it.
+        """
+
+        def wait_and_send():
+            time.sleep(1)
+            self.channel_layer.send('foo!aaa', {'bar': 'baz'})
+
+        thread = threading.Thread(target=wait_and_send)
+        thread.deamon = True
+        thread.start()
+
+        channel, message = self.channel_layer.receive(['foo!'], block=True)
+        assert channel == 'foo!aaa'
+        assert message == {'bar': 'baz'}
+
     def test_send_group_message_expiry(self):
         """
         Tests that messages expire correctly when it was sent to group.

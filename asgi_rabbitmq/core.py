@@ -46,6 +46,7 @@ class Protocol(object):
         # different threads.
         self.consumed_channels = set()
         self.message_store = defaultdict(deque)
+        self.blocked_receive = set()
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
@@ -182,11 +183,14 @@ class Protocol(object):
         if block:
             consumer_tags = {}
             for channel in channels:
-                tag = self.amqp_channel.basic_consume(
-                    partial(self.consume_message, consumer_tags),
-                    queue=self.get_queue_name(channel),
-                )
-                consumer_tags[tag] = channel
+                if '!' in channel:
+                    self.blocked_receive.add(channel)
+                else:
+                    tag = self.amqp_channel.basic_consume(
+                        partial(self.consume_message, consumer_tags),
+                        queue=self.get_queue_name(channel),
+                    )
+                    consumer_tags[tag] = channel
         else:
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel, channels = channels[0], channels[1:]
@@ -213,6 +217,7 @@ class Protocol(object):
         amqp_channel.basic_ack(method_frame.delivery_tag)
         for tag in consumer_tags:
             amqp_channel.basic_cancel(consumer_tag=tag)
+        self.blocked_receive = set()
         channel = consumer_tags[method_frame.consumer_tag]
         if properties.headers and 'asgi_channel' in properties.headers:
             channel = channel + properties.headers['asgi_channel']
@@ -228,7 +233,12 @@ class Protocol(object):
             full_channel_name = channel + properties.headers['asgi_channel']
         else:
             full_channel_name = channel
-        self.message_store[channel].append((full_channel_name, body))
+        if channel in self.blocked_receive:
+            self.blocked_receive = set()
+            message = self.deserialize(body)
+            self.resolve.set_result((full_channel_name, message))
+        else:
+            self.message_store[channel].append((full_channel_name, body))
 
     def get_message(self, channel, no_message, amqp_channel, method_frame,
                     properties, body):
