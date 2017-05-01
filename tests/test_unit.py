@@ -332,7 +332,9 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         thread.start()
 
         # Start consumer.
-        self.channel_layer.receive(['foo!'])
+        channel, message = self.channel_layer.receive(['foo!'])
+        assert channel is None
+        assert message is None
 
         # Wait for message arrives in the store.
         time.sleep(2)
