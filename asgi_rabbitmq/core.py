@@ -186,6 +186,7 @@ class Protocol(object):
                 channel_name, body = self.message_store[channel].popleft()
                 message = self.deserialize(body)
                 self.resolve.set_result((channel_name, message))
+                return
         # Receive message.
         if block:
             for channel in channels:
