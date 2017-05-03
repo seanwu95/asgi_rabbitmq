@@ -65,6 +65,35 @@ metrics with wrk_ tool.  WebSockets can be tested the same way
 with `autobahn testsuite`_ or thor_ tools.  Channels itself contain
 benchmark_ tool but it will require some adaption for your project.
 
+SSL connection
+--------------
+
+Connection via SSL is pretty easy too.  You can read about this at the
+end of `pika URLParameters`_ page.  Example of SSL connection::
+
+    amqps://guest:guest@localhost:5672/myvhost
+
+You can pass additional SSL arguments in the connection query string:
+
+.. code:: python
+
+    import urllib
+
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'asgi_rabbitmq.RabbitmqChannelLayer',
+            'ROUTING': 'myproject.routing.routes',
+            'CONFIG': {
+                'url': 'amqps://guest:guest@rabbitmq:5672/%2F?' + urlencode({
+                           'ssl_options': {
+                               'certfile': '/etc/ssl/mycert.pem',
+                               'keyfile': '/etc/ssl/mykey.pem',
+                           }
+                       }),
+            },
+        },
+    }
+
 Cluster support
 ---------------
 
