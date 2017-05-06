@@ -142,12 +142,12 @@ class Protocol(object):
 
     # Receive.
 
-    def receive(self, channels, block):
+    def receive(self, channels, block, new_consumers):
 
         queues = set(map(self.get_queue_name, channels))
         unknown_queues = queues - self.known_queues
-        queues_declared = partial(self.queues_declared, queues, channels,
-                                  block)
+        queues_declared = partial(self.queues_declared, queues, new_consumers,
+                                  channels, block)
         if unknown_queues:
             for queue in unknown_queues:
                 self.amqp_channel.queue_declare(
@@ -158,9 +158,10 @@ class Protocol(object):
                     arguments=self.queue_arguments,
                 )
         else:
-            self.queues_declared(set(), channels, block, None)
+            self.queues_declared(set(), new_consumers, channels, block, None)
 
-    def queues_declared(self, queues, channels, block, method_frame):
+    def queues_declared(self, queues, new_consumers, channels, block,
+                        method_frame):
 
         if method_frame:
             self.known_queues.add(method_frame.method.queue)
@@ -180,6 +181,11 @@ class Protocol(object):
                     exclusive=True,
                 )
                 self.consumed_channels.add(channel)
+                new_consumers.add(channel)
+        # FIXME: split function here.  The rest of it maybe running
+        # from Consume.Ok or manually if all consumers already
+        # started.
+        #
         # Check local storage.
         for channel in channels:
             if '!' in channel and self.message_store.get(channel, None):
@@ -201,13 +207,22 @@ class Protocol(object):
         else:
             channels = list(channels)  # Daphne sometimes pass dict.keys()
             channel, channels = channels[0], channels[1:]
-            if '!' in channel:
+            if '!' in channel and channel not in new_consumers:
                 if channels:
-                    self.receive(channels=channels, block=False)
+                    self.receive(
+                        channels=channels,
+                        block=False,
+                        new_consumers=new_consumers,
+                    )
                 else:
                     self.resolve.set_result((None, None))
             else:
-                no_message = partial(self.no_message, channels)
+                no_message = partial(
+                    self.no_message,
+                    channel,
+                    channels,
+                    new_consumers,
+                )
                 self.amqp_channel.add_callback(no_message, [Basic.GetEmpty])
                 self.amqp_channel.basic_get(
                     partial(self.get_message, channel, no_message),
@@ -249,6 +264,8 @@ class Protocol(object):
     def get_message(self, channel, no_message, amqp_channel, method_frame,
                     properties, body):
 
+        # FIXME: This is insane.  First two messages doesn't granite
+        # order because of parallel consumer and get operation.
         amqp_channel.callbacks.remove(
             amqp_channel.channel_number,
             Basic.GetEmpty,
@@ -260,10 +277,27 @@ class Protocol(object):
         message = self.deserialize(body)
         self.resolve.set_result((channel, message))
 
-    def no_message(self, channels, method_frame):
+    def no_message(self, channel, channels, new_consumers, method_frame):
 
+        # FIXME: Remove this code:
+        if channel in new_consumers:
+            # NOTE: First time we start Basic.Consume and Basic.Get
+            # simultaneously.  If queue contains only one message we
+            # don't know if it would be taken by consumer or by get
+            # operation.  Consumer possible receive it first, so we
+            # need to check message store.
+            if self.message_store.get(channel, None):
+                channel_name, body = self.message_store[channel].popleft()
+                message = self.deserialize(body)
+                self.resolve.set_result((channel_name, message))
+                return
+        # End of remove.
         if channels:
-            self.receive(channels=channels, block=False)
+            self.receive(
+                channels=channels,
+                block=False,
+                new_consumers=new_consumers,
+            )
         else:
             self.resolve.set_result((None, None))
 
@@ -720,7 +754,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         for channel in channels:
             fail_msg = 'Channel name %s is not valid' % channel
             assert self.valid_channel_name(channel, receive=True), fail_msg
-        future = self.thread.schedule(RECEIVE, channels, block)
+        future = self.thread.schedule(RECEIVE, channels, block, set())
         return future.result()
 
     def new_channel(self, pattern):
