@@ -421,7 +421,7 @@ class Protocol(object):
 
     def get_expire_marker(self, group, channel):
 
-        return 'expire.bind.%s.%s' % (group, self.get_queue_name(channel))
+        return 'expire.bind.%s.%s' % (group, channel)
 
     def declare_dead_letters(self):
 
