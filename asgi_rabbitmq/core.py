@@ -251,7 +251,7 @@ class Protocol(object):
 
                 self.amqp_channel.queue_bind(
                     after_bind,
-                    queue=self.get_queue_name(channel),
+                    queue=channel,
                     exchange=channel,
                 )
 
