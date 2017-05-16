@@ -675,7 +675,13 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         assert self.valid_group_name(group), 'Group name is not valid'
         future = self.thread.schedule(SEND_GROUP, group, message)
-        return future.result()
+        try:
+            return future.result()
+        except ChannelClosed:
+            # Channel was closed because corresponding group exchange
+            # does not exist yet.  This mean no one call `group_add`
+            # yet, so group is empty and we should not worry about.
+            pass
 
 
 # TODO: Is it optimal to read bytes from content frame, call python
