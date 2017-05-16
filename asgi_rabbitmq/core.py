@@ -1,6 +1,8 @@
 import base64
 import hashlib
+import random
 from functools import partial
+from string import ascii_letters as ASCII
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
@@ -40,7 +42,6 @@ class Protocol(object):
         self.get_capacity = get_capacity
         self.ident = ident
         self.crypter = crypter
-        self.known_queues = set()
         self.methods = {
             SEND: self.send,
             RECEIVE: self.receive,
@@ -71,24 +72,8 @@ class Protocol(object):
 
         if '!' in channel:
             return channel[:channel.rfind('!') + 1]
-        elif '?' in channel:
-            return 'amq.gen-' + channel.rsplit('?', 1)[-1]
         else:
             return channel
-
-    def get_exchange_name(self, channel):
-
-        if '?' in channel:
-            return channel.rsplit('?', 1)[-1]
-        else:
-            return channel
-
-    def get_queue_exchange(self, queue):
-
-        if queue.startswith('amq.gen-'):
-            return queue[8:]
-        else:
-            return queue
 
     # Send.
 
@@ -98,13 +83,11 @@ class Protocol(object):
         self.amqp_channel.queue_declare(
             partial(self.handle_publish, channel, message),
             queue=queue,
-            passive=True if '?' in channel else False,
             arguments=self.queue_arguments,
         )
 
     def handle_publish(self, channel, message, method_frame):
 
-        self.known_queues.add(method_frame.method.queue)
         if method_frame.method.message_count >= self.get_capacity(channel):
             self.resolve.set_exception(RabbitmqChannelLayer.ChannelFull())
             return
@@ -137,31 +120,27 @@ class Protocol(object):
     def receive(self, channels, block):
 
         queues = set(map(self.get_queue_name, channels))
-        unknown_queues = queues - self.known_queues
-        queues_declared = partial(self.queues_declared, queues, channels,
-                                  block)
+        known_queues = set()
+        queues_declared = partial(self.queues_declared, queues, known_queues,
+                                  channels, block)
+        for queue in queues:
+            self.amqp_channel.queue_declare(
+                queues_declared,
+                queue,
+                arguments=self.queue_arguments,
+            )
+
+    def queues_declared(self, queues, known_queues, channels, block,
+                        method_frame):
+
+        known_queues.add(method_frame.method.queue)
+        # If all queues are known at this moment, that basically means
+        # we are in the last callback and can safely go further.  If
+        # any queue isn't known, we simply skip processing at this
+        # point.
+        unknown_queues = queues - known_queues
         if unknown_queues:
-            for queue in unknown_queues:
-                self.amqp_channel.queue_declare(
-                    queues_declared,
-                    queue,
-                    passive=True if queue.startswith('amq.gen') else False,
-                    arguments=self.queue_arguments,
-                )
-        else:
-            self.queues_declared(set(), channels, block, None)
-
-    def queues_declared(self, queues, channels, block, method_frame):
-
-        if method_frame:
-            self.known_queues.add(method_frame.method.queue)
-            # If all queues are known at this moment, that basically
-            # means we are in the last callback and can safely go
-            # further.  If any queue isn't known, we simply skip
-            # processing at this point.
-            unknown_queues = queues - self.known_queues
-            if unknown_queues:
-                return
+            return
         if block:
             consumer_tags = {}
             for channel in channels:
@@ -216,21 +195,24 @@ class Protocol(object):
     @property
     def queue_arguments(self):
 
-        return {'x-dead-letter-exchange': self.dead_letters}
+        return {
+            'x-dead-letter-exchange': self.dead_letters,
+            'x-expires': self.expiry * 2000,
+        }
 
     # New channel.
 
-    def new_channel(self):
+    def new_channel(self, new_name):
 
         self.amqp_channel.queue_declare(
             self.new_channel_declared,
+            queue=new_name,
             arguments=self.queue_arguments,
         )
 
     def new_channel_declared(self, method_frame):
 
-        self.known_queues.add(method_frame.method.queue)
-        self.resolve.set_result(method_frame.method.queue)
+        self.resolve.set_result(None)
 
     # Groups.
 
@@ -269,15 +251,15 @@ class Protocol(object):
 
                 self.amqp_channel.queue_bind(
                     after_bind,
-                    queue=self.get_queue_name(channel),
-                    exchange=self.get_exchange_name(channel),
+                    queue=channel,
+                    exchange=channel,
                 )
 
             def bind_group(method_frame):
 
                 self.amqp_channel.exchange_bind(
                     bind_channel,
-                    destination=self.get_exchange_name(channel),
+                    destination=channel,
                     source=group,
                 )
 
@@ -296,8 +278,9 @@ class Protocol(object):
 
                 self.amqp_channel.exchange_declare(
                     declare_channel,
-                    exchange=self.get_exchange_name(channel),
+                    exchange=channel,
                     exchange_type='fanout',
+                    auto_delete=True,
                 )
 
         self.amqp_channel.exchange_declare(
@@ -317,7 +300,7 @@ class Protocol(object):
         else:
             self.amqp_channel.exchange_unbind(
                 lambda method_frame: self.resolve.set_result(None),
-                destination=self.get_exchange_name(channel),
+                destination=channel,
                 source=group,
             )
 
@@ -364,7 +347,7 @@ class Protocol(object):
 
     def get_expire_marker(self, group, channel):
 
-        return 'expire.bind.%s.%s' % (group, self.get_queue_name(channel))
+        return 'expire.bind.%s.%s' % (group, channel)
 
     def declare_dead_letters(self):
 
@@ -412,8 +395,7 @@ class Protocol(object):
                 queue = queue + properties.headers['asgi_channel']
                 amqp_channel.queue_delete(queue=queue)
             else:
-                exchange = self.get_queue_exchange(queue)
-                amqp_channel.exchange_delete(exchange=exchange)
+                amqp_channel.exchange_delete(exchange=queue)
         elif reason == 'maxlen' and '!' in queue:
             self.publish_message(queue, body)
 
@@ -669,10 +651,11 @@ class RabbitmqChannelLayer(BaseChannelLayer):
     def new_channel(self, pattern):
 
         assert pattern.endswith('?')
-        future = self.thread.schedule(NEW_CHANNEL)
-        queue_name = future.result()
-        channel = pattern + queue_name[8:]  # Remove 'amq.gen-' prefix.
-        return channel
+        random_string = "".join(random.choice(ASCII) for i in range(20))
+        new_name = pattern + random_string
+        future = self.thread.schedule(NEW_CHANNEL, new_name)
+        future.result()
+        return new_name
 
     def group_add(self, group, channel):
 
@@ -692,7 +675,13 @@ class RabbitmqChannelLayer(BaseChannelLayer):
 
         assert self.valid_group_name(group), 'Group name is not valid'
         future = self.thread.schedule(SEND_GROUP, group, message)
-        return future.result()
+        try:
+            return future.result()
+        except ChannelClosed:
+            # Channel was closed because corresponding group exchange
+            # does not exist yet.  This mean no one call `group_add`
+            # yet, so group is empty and we should not worry about.
+            pass
 
 
 # TODO: Is it optimal to read bytes from content frame, call python

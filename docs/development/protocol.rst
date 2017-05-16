@@ -39,10 +39,8 @@ is set as message property.
 Receive
 ~~~~~~~
 
-Each channel instance contains known queues cache.  When we tries to
-receive message from channel and corresponding queue doesn't present
-in this cache we declare it first.  This allows us prevent 404 errors
-when receiving from non existing channel.
+We declare queue before each message sending.  This allows us prevent
+404 errors when receiving from non existing channel.
 
 In the non blocking mode we use Basic.Get operation.  Receiving
 Get.Ok means that we successfully received a message.  We can stop
@@ -61,25 +59,9 @@ Single reader channels
 ----------------------
 
 Single readers like ``http.request.body?ABCDEF`` have unique part in
-their names.  These channels should be created with ``new_channel`` method.
-This method call Queue.Declare with empty queue name.  RabbitMQ will
-generate unique queue name and return it in the Declare.Ok response.
-This queue will have special prefix means it was
-automatically generated (like ``amq.gen-ABCDEF``).
-
-Send
-~~~~
-
-When we send message to this queue we declare it in passive mode.
-This allows us to check queue length if it exists without queue
-creation.  The rest of the procedure is the same.
-
-Receive
-~~~~~~~
-
-When we try to receive from single reader channel we declare
-corresponding queue in the passive mode.  Just to put it into cache of
-know queues.  The rest of the procedure is the same.
+their names.  These channels should be created with ``new_channel``
+method.  This method generate random string and call Queue.Declare
+with that name.
 
 Process specific channels
 -------------------------
@@ -120,11 +102,10 @@ Add
 Groups for regular and single reader channels are implemented as two
 steps bindings.  First of all we have fanout exchange which name
 equals to the group name.  Then we have intermediate exchange named
-after channel we want to add to group.  Exchange for regular channel
-have the same name.  Exchange for single reader has name equals to
-part after "?" sign.  After that we create exchange to exchange
-binding between group exchange and the intermediate one.  After this
-we declare queue according to the rules above and bind it to the
+after channel we want to add to group.  Intermediate exchange name is
+equal to channel.  After that we create exchange to exchange binding
+between group exchange and the intermediate one.  After this we
+declare queue according to the rules above and bind it to the
 intermediate exchange.
 
 Also we create marker queue which can hold only one marker message at
@@ -174,8 +155,8 @@ routes message to this queue.  This queue has max length set to zero.
 Message routed to this queue will be immediately dead lettered.  In
 the dead letter consumer we will see death queue name.  This allow us
 to send message into right process local queue with ``asgi_channel``
-header.  Also this allows to "copy" message into same process local
-queue twice.
+header calculated from the queue name.  Also this allows to "copy"
+message into same process local queue twice.
 
 Discard
 ~~~~~~~
@@ -187,15 +168,16 @@ instead of intermediate exchange we operate on intermediate queue.
 Resource Cleanup
 ----------------
 
-* Queues for regular channels are never deleted.
-* (TODO) Queues for single reader channels are never deleted.
-* (TODO) Queues for process local channels are never deleted.
+* Queues for regular channels, single reader channels and process
+  local channels will be removed after TTL equals message expiry x2
+  since last message was sent to this channel.
 * Intermediate queues for process local channels will expire after
   group expiry seconds.
 * Queues for group membership marker will expire after group expiry
   seconds.
-* (TODO) Group exchanges are never deleted.
-* (TODO) Intermediate group exchanges are never deleted
+* Group exchanges are never deleted.
+* Intermediate group exchanges are deleted after corresponding queue
+  was cleaned up.
 
 .. _asgi: http://channels.readthedocs.io/en/stable/asgi.html
 .. _amqp: https://www.rabbitmq.com/amqp-0-9-1-reference.html
