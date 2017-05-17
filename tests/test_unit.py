@@ -513,6 +513,17 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
         # Check chat corresponding queue was removed.
         assert 'foo.xxx!' not in self.defined_queues
 
+    def test_delay_connection_for_first_method_call(self):
+        """
+        We shouldn't connect to the broker until use call layer method
+        first time.
+        """
+
+        time.sleep(0.2)  # Give connection time to be open.
+        assert not self.defined_queues
+        self.channel_layer.send('foo', {'bar': 'baz'})
+        assert {'foo', 'dead-letters'} == self.defined_queues
+
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
 

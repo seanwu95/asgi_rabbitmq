@@ -623,9 +623,20 @@ class RabbitmqChannelLayer(BaseChannelLayer):
             crypter = MultiFernet(sub_fernets)
         else:
             crypter = None
-        self.thread = self.Thread(url, expiry, group_expiry, self.get_capacity,
-                                  crypter)
-        self.thread.start()
+        self._thread = self.Thread(url, expiry, group_expiry,
+                                   self.get_capacity, crypter)
+
+    @property
+    def thread(self):
+        """
+        Connection thread.  Holds connection heartbeats.  Ensure that
+        thread is started.
+        """
+
+        if not self._thread._started.is_set():
+            self._thread.start()
+
+        return self._thread
 
     def make_fernet(self, key):
 
