@@ -4,6 +4,12 @@
 Changelog
 ---------
 
+0.5 (2017-05-28)
+++++++++++++++++
+
+- Resource cleanup.
+- Start connection on first network operation call.
+
 0.4.1 (2017-04-15)
 ++++++++++++++++++
 
