@@ -4,6 +4,11 @@
 Changelog
 ---------
 
+0.5.1 (2017-06-06)
+++++++++++++++++++
+
+- Fix ``AttributeError`` on Thread access.  Issue `#6`_.
+
 0.5 (2017-05-28)
 ++++++++++++++++
 
@@ -48,3 +53,5 @@ Changelog
 ++++++++++++++++
 
 - Initial public release.
+
+.. _#6: https://github.com/proofit404/asgi_rabbitmq/issues/6
