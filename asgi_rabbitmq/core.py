@@ -6,6 +6,7 @@ from string import ascii_letters as ASCII
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
+from cached_property import cached_property
 from pika import SelectConnection, URLParameters
 from pika.channel import Channel
 from pika.exceptions import ChannelClosed, ConnectionClosed
@@ -626,16 +627,14 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         self._thread = self.Thread(url, expiry, group_expiry,
                                    self.get_capacity, crypter)
 
-    @property
+    @cached_property
     def thread(self):
         """
         Connection thread.  Holds connection heartbeats.  Ensure that
         thread is started.
         """
 
-        if not self._thread._started.is_set():
-            self._thread.start()
-
+        self._thread.start()
         return self._thread
 
     def make_fernet(self, key):
