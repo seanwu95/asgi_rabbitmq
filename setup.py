@@ -18,6 +18,7 @@ setup(
         'pika==0.10.0',
         'asgiref>=1.0.0',
         'msgpack-python',
+        'cached-property',
         'futures ; python_version < "3.0"',
     ],
     extras_require={
