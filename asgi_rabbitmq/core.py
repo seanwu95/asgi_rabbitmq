@@ -6,7 +6,7 @@ from string import ascii_letters as ASCII
 
 import msgpack
 from asgiref.base_layer import BaseChannelLayer
-from cached_property import cached_property
+from cached_property import threaded_cached_property
 from pika import SelectConnection, URLParameters
 from pika.channel import Channel
 from pika.exceptions import ChannelClosed, ConnectionClosed
@@ -627,7 +627,7 @@ class RabbitmqChannelLayer(BaseChannelLayer):
         self._thread = self.Thread(url, expiry, group_expiry,
                                    self.get_capacity, crypter)
 
-    @cached_property
+    @threaded_cached_property
     def thread(self):
         """
         Connection thread.  Holds connection heartbeats.  Ensure that
