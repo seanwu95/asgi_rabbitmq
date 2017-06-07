@@ -4,6 +4,11 @@
 Changelog
 ---------
 
+0.5.2 (2017-06-07)
+++++++++++++++++++
+
+- Don't try to start connection thread twice.
+
 0.5.1 (2017-06-06)
 ++++++++++++++++++
 
