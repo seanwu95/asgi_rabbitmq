@@ -521,8 +521,8 @@ class RabbitmqChannelLayerTest(RabbitmqLayerTestCaseMixin, SimpleTestCase,
 
         time.sleep(0.2)  # Give connection time to be open.
         assert not self.defined_queues
-        self.channel_layer.send('foo', {'bar': 'baz'})
-        assert {'foo', 'dead-letters'} == self.defined_queues
+        self.channel_layer.send('foo.xxx!yyy', {'bar': 'baz'})
+        assert {'foo.xxx!', 'dead-letters'} == self.defined_queues
 
 
 class RabbitmqLocalChannelLayerTest(RabbitmqChannelLayerTest):
