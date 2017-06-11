@@ -189,6 +189,8 @@ class Protocol(object):
     def no_message(self, channels, method_frame):
 
         if channels:
+            # FIXME: Do not declare queues again.  Go to the Basic.Get
+            # operation.
             self.receive(channels=channels, block=False)
         else:
             self.resolve.set_result((None, None))
