@@ -1,3 +1,5 @@
+"""AMQP benchmarking tool."""
+
 from __future__ import print_function
 
 import glob
@@ -34,18 +36,21 @@ PIKALOG = os.environ.get('PIKALOG', 'False') == 'True'
 
 
 def maybe_monkeypatch(todir):
+    """Setup benchmark if enable.[]"""
 
     if BENCHMARK:
         monkeypatch_all(todir)
 
 
 def maybe_print_stats(fromdir):
+    """Print benchmark stats if enable."""
 
     if BENCHMARK:
         print_stats(fromdir)
 
 
 def monkeypatch_all(todir):
+    """Setup benchmark."""
 
     monkeypatch_connection()
     monkeypatch_layer()
@@ -53,11 +58,13 @@ def monkeypatch_all(todir):
 
 
 def monkeypatch_connection():
+    """Substitute AMQP channel with benchmark measurement class."""
 
     asgi_rabbitmq.core.LayerConnection.Channel = DebugChannel
 
 
 def monkeypatch_layer():
+    """Decorate layer methods with benchmark."""
 
     layer = asgi_rabbitmq.core.RabbitmqChannelLayer
     layer.send = bench(layer.send)
@@ -69,10 +76,14 @@ def monkeypatch_layer():
 
 
 def monkeypatch_test_case(todir):
+    """
+    Setup live server test case with benchmark measurement processes.
+    """
 
     case = ChannelLiveServerTestCase
     case.ProtocolServerProcess = partial(DebugDaphneProcess, todir)
     case.WorkerProcess = partial(DebugWorkerProcess, todir)
+    # Decorate test teardown method.
     case._post_teardown = signal_first(case._post_teardown)
 
 
@@ -89,7 +100,9 @@ def percentile(values, fraction):
 
 
 def print_stats(fromdir):
+    """Print collected statistics."""
 
+    # Include statistics from subprocesses.
     for statfile in glob.glob('%s/*.dump' % fromdir):
         with open(statfile) as f:
             statblob = f.read()
@@ -105,6 +118,7 @@ def print_stats(fromdir):
     headers = ['method', 'calls', 'mean', 'median', 'stdev', '95%', '99%']
     for num, stats in enumerate([amqp_stats, layer_stats], start=1):
         if stats:
+            # Print statistic table.
             data = []
             for method, latencies in stats.items():
                 if isinstance(latencies, list):
@@ -134,6 +148,10 @@ def print_stats(fromdir):
 
 
 def save_stats(todir):
+    """
+    Dump collected statistic to the json file.  Used to from live
+    server test case subprocesses.
+    """
 
     statdata = [amqp_stats, layer_stats]
     statblob = json.dumps(statdata)
@@ -146,14 +164,14 @@ def bench(f, count=False):
     """Collect function call duration statistics."""
 
     if count:
-
+        # Just count the numbers of function calls.
         @wraps(f)
         def wrapper(*args, **kwargs):
             layer_stats.setdefault(f.__name__, 0)
             layer_stats[f.__name__] += 1
             return f(*args, **kwargs)
     else:
-
+        # Calculate exact duration of each function call.
         @wraps(f)
         def wrapper(*args, **kwargs):
 
@@ -168,6 +186,10 @@ def bench(f, count=False):
 
 
 def wrap(method, callback):
+    """
+    Measure the latency between request start and response callback.
+    Used to measure low-level AMQP frame operations.
+    """
 
     start = time.time()
 
@@ -257,6 +279,10 @@ class DebugChannel(asgi_rabbitmq.core.LayerConnection.Channel):
 
 
 class DebugDaphneProcess(DaphneProcess):
+    """
+    Live server test case subprocess which dumps benchmark statistics
+    to the json file before exit.
+    """
 
     def __init__(self, todir, *args):
 
@@ -272,6 +298,10 @@ class DebugDaphneProcess(DaphneProcess):
 
 
 class DebugWorkerProcess(WorkerProcess):
+    """
+    Live server test case subprocess which dumps benchmark statistics
+    to the json file before exit.
+    """
 
     def __init__(self, todir, *args):
 
@@ -287,6 +317,7 @@ class DebugWorkerProcess(WorkerProcess):
 
 
 def signal_first(method):
+    """Decorate function call with test subprocess teardown."""
 
     def decorated_method(self):
 
@@ -299,12 +330,14 @@ def signal_first(method):
 
 
 def at_exit(todir, signum, frame):
+    """Save statistics to the file."""
 
     if BENCHMARK:
         save_stats(todir)
 
 
 def setup_logger(name):
+    """Enable debug logging."""
 
     if DEBUGLOG:
         logging.basicConfig(

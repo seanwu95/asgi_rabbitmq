@@ -22,10 +22,13 @@ class RabbitmqLayerTestCaseMixin(object):
     def _pre_setup(self):
         """Create RabbitMQ virtual host."""
 
+        # Check if we are mixed with the class that makes sense.
         if ChannelTestCaseMixin in self.__class__.__mro__:
             raise ImproperlyConfigured(
                 'ChannelTestCase is not allowed as base class for '
                 'RabbitmqLayerTestCaseMixin')
+        # Create new virtual host for this test and grant permissions
+        # to it.
         hostname = environ.get('RABBITMQ_HOST', 'localhost')
         port = environ.get('RABBITMQ_PORT', '5672')
         user = environ.get('RABBITMQ_USER', 'guest')
@@ -37,6 +40,7 @@ class RabbitmqLayerTestCaseMixin(object):
         self.management = AdminAPI(management_url, (user, password))
         self.management.create_vhost(self.virtual_host)
         self.management.create_user_permission(user, self.virtual_host)
+        # Substitute Django settings with this virtual host.
         if self.local:
             layer_class_name = 'asgi_rabbitmq.RabbitmqLocalChannelLayer'
         else:
@@ -62,10 +66,13 @@ class RabbitmqLayerTestCaseMixin(object):
         """Remove RabbitMQ virtual host."""
 
         super(RabbitmqLayerTestCaseMixin, self)._post_teardown()
+        # Disable overridden settting.
         self._self_overridden_context.disable()
         delattr(self, '_self_overridden_context')
         self._overridden_settings = None
+        # Remove temporal virtual host.
         self.management.delete_vhost(self.virtual_host)
+        # Cleanup test instance.
         del self.virtual_host
         del self.amqp_url
         del self.management
