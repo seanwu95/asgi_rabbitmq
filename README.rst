@@ -30,6 +30,8 @@ support for your own protocols and needs.
 - `Issue Tracker`_
 - `Documentation`_
 
+.. figure:: docs/img/infrastructure.png
+
 Installation
 ------------
 

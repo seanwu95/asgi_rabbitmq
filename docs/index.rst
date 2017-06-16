@@ -14,6 +14,8 @@ code, using familiar Django design patterns and a flexible underlying
 framework that lets you not only customize behaviours but also write
 support for your own protocols and needs.
 
+.. figure:: img/infrastructure.png
+
 .. toctree::
     :maxdepth: 2
     :caption: Contents:
